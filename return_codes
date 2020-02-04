@@ -1,0 +1,28 @@
+Create
+100 - Create document Successful
+101 - Create multiple Documents Successful
+200 - Error creating document
+201 - Error creating some documents
+202 - Error creating all documents
+
+Read
+300 - Successfully read document
+400 - Error reading document
+
+Update
+500 - Document successfully updated
+501 - Documents successfully updated
+600 - Document is dead, cannot update a dead document
+601 - Error updating some of the documents
+602 - Error updating all of the documents
+
+Delete
+700 - Document successfully killed
+701 - Documents successfully killed
+800 - Document already dead
+801 - Error killing some documents
+802 - Error killing all documents
+
+Retrieval errors
+900 - Database not found
+901 - Document not found
