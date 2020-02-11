@@ -23,6 +23,7 @@ import uuid
 #   code needs to do is handle saving of body to block chain and figuring out (thanks to public/private keys) how to
 #   keep all things related together
 #   * Encrypt document so that not everyone can read it, allow update to change the hashing algo
+#   * allow for fully decrypted parts of the chain for open data, but find a way so that not everyone can amend it
 #   * Add a ressurect to change from dead back to alive
 #   * Step 1: Refactor the below and put in its own project - DONE
 #   * Step 2: Rewrite below to make more sense as a document store. Should be straight forward for the initial part.
@@ -100,10 +101,10 @@ class Blockchain:
         return True
 
     # Document Creation #
-    # TODO: Check that document_key doesn't exist in the db, it really shouldn't but who knows
+    # TODO: Handle existing key better, just try it again, in a while loop or somtehing
     def create_document(self, database_key, document):
         document_key = str(uuid.uuid4())
-        previous_document = self.get_document(database_key, document_key, False)
+        previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document != 900:
             return 200
         self.database_key = database_key
@@ -142,15 +143,65 @@ class Blockchain:
         return 101, document_keys
 
     # Document Queries #
+    # TODO: going to be the most complicated as need to be able to understand various user queries
     # simple select latest #
-    def read_document(self, database_key, document_key, version=0):
-        # TODO: going to be the most complicated as need to be able to understand various user queries
-        previous_document = self.get_document(database_key, document_key, True, version)
-        return previous_document
+    def get_latest(self, database_key, document_key):
+        return self.get_document(database_key, document_key, 'latest')
+
+    # select specific version #
+    def get_specific_document_version(self, database_key, document_key, version):
+        if version is None:
+            return 401
+        document = self.get_document(database_key, document_key, 'version', version)
+        return document
+
+    # select all versions of a document #
+    # TODO: Get latest version, save version number and then loop through until you get to that number and return them
+    def get_all_document_versions(self, database_key, document_key):
+        documents_history = [self.get_document(database_key, document_key, 'latest')]
+        latest_version = documents_history[0]['version']
+
+        for version in range(latest_version):
+            documents_history.append(self.get_document(database_key, documents_history, 'version', version))
+
+        if not documents_history:
+            return 402
+        return documents_history
+
+    # select multiple documents from a database but only latest version #
+    # TODO: loop through get_latest
+    def get_multiple_latest(self, database_key, document_keys):
+        return self.get_documents(database_key, document_keys, 'latest')
+
+    # select all documents from a database but only latest version #
+    # TODO: loop through get_latest but find a way to not provide a doc key
+    def get_all_documents(self, database_key):
+        return self.get_documents(database_key, 0, 'all latest')
+
+    # select specific versions for multiple documents #
+    # TODO: loop through get_specific_document_version
+    def get_specific_document_versions(self, database_key, document_keys_version_pair):
+        documents = []
+        for document_key, version in document_keys_version_pair:
+            documents.append(self.get_specific_document_version(database_key,document_key, version))
+        return documents
+
+    # select multiple documents and all versions from a db #
+    # TODO: Loop through the single equivalent
+    def get_multiple_documents_and_versions(self, database_key, document_keys):
+        documents = []
+        for document_key in document_keys:
+            documents.append(self.get_all_document_versions(database_key, document_key))
+        return documents
+
+    # select all documents and all versions from a db #
+    # TODO: Loop through single equivalent and figure out how not to provide a key
+    def get_all_documents_and_versions(self, database_key):
+        return self.get_documents(database_key, 0, 'all')
 
     # Document Updates #
     def update_document(self, database_key, document_key, document):
-        previous_document = self.get_document(database_key, document_key, False)
+        previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document == 900:
             return 900
         if previous_document['is_alive']:
@@ -185,7 +236,7 @@ class Blockchain:
 
     # Document Deletion #
     def delete_document(self, database_key, document_key):
-        previous_document = self.get_document(database_key, document_key, False)
+        previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document == 900:
             return 900
         if not previous_document['is_alive']:
@@ -218,17 +269,61 @@ class Blockchain:
             return 801, failures
         return 701
 
-    # TODO: Implement queries
-    def get_document(self, database_key, document_key, read, version=0):
+    # TODO: Implement queries, and merkel tress
+    def get_document(self, database_key, document_key, query, version=0):
+        # TODO: Only store the db instead of the chain? Would make it more efficient to run multiple queries against
+        #  same db
         chain = self.chain
         # TODO: Use a better searching algorithm
         # TODO: Check efficiency
-        if not read:
+        if query == 'latest':
             for block in sorted(chain, reverse=True):
-                if block['database_key'] == database_key & block['document']['document_key'] == document_key:
+                if block['database_key'] == database_key and block['document']['document_key'] == document_key:
                     return block['document']
             return 901
-        return 900
+        elif query == 'version':
+            for block in chain:
+                if block['database_key'] == database_key and block['document']['document_key'] == document_key and block['document']['version'] == version:
+                    return block['document']
+                return 902
+        else:
+            return 910
+
+    # TODO: Only allow queries from the same db key for now
+    def get_documents(self, database_key, document_keys, query, versions=0):
+        chain = self.chain
+        documents = []
+        if query == 'latest':
+            for block in sorted(chain, reverse=True):
+                if block['database_key'] == database_key and block['document']['document_key'] in document_keys:
+                    documents.append(block['document'])
+            if not documents:
+                return 903
+        elif query == 'version':
+            for block in chain:
+                if block['database_key'] == database_key and block['document']['document_key'] in document_keys and block['document']['version'] in versions:
+                    documents.append(block['document'])
+            if not documents:
+                return 904
+        elif query == 'all latest':
+            for block in sorted(chain, reverse=True):
+                # TODO: This if will probably not work...
+                if block['database_key'] == database_key and block['document']['document_key'] not in documents:
+                    documents.append(block['document'])
+            if not documents:
+                return 905
+        elif query == 'all':
+            for block in chain:
+                if block['database_key'] == database_key:
+                    documents.append(block['document'])
+            if not documents:
+                return 906
+        else:
+            return 910
+
+        if not documents:
+            return 999
+        return documents
 
     def add_node(self, address):
         parsed_url = urlparse(address)

@@ -8,6 +8,8 @@ Create
 Read
 300 - Successfully read document
 400 - Error reading document
+401 - Document version not provided
+402 - No document found
 
 Update
 500 - Document successfully updated
@@ -26,3 +28,9 @@ Delete
 Retrieval errors
 900 - Database not found
 901 - Document not found
+902 - Document version not found
+903 - Documents not found
+904 - Document versions not found
+905 - No Documents found
+
+910 - Query invalid
