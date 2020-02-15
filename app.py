@@ -11,7 +11,7 @@ import uuid
 #   * Add dependency to mine the block immediately for private chains. For public chains maybe store multiple documents
 #   into one "transaction", depending on size, but one insert/update per block could work. Start with one per block.
 #   * To start for each insert/update it will mine the block, can't be too difficult as you'd only mine it when using
-#   * Implement Merkel trees
+#   * Implement Merkel trees to check chain validity and if block can be added
 #   * Use public/private keys to use to differentiate the different tables/queries, for public chain, so that an insert
 #   or update only 'impacts' the area desired. Instead of wallets, you'd have "table/db" access based on keys, so
 #   when you have Merkel trees implemented you can only extract that "tables" that relate to you and other people can't
@@ -24,9 +24,7 @@ import uuid
 #   keep all things related together
 #   * Encrypt document so that not everyone can read it, allow update to change the hashing algo
 #   * allow for fully decrypted parts of the chain for open data, but find a way so that not everyone can amend it
-#   * Add a ressurect to change from dead back to alive
-#   * Step 1: Refactor the below and put in its own project - DONE
-#   * Step 2: Rewrite below to make more sense as a document store. Should be straight forward for the initial part.
+#   * Next: Rewrite below to make more sense as a document store. Should be straight forward for the initial part.
 #   Hard part will be the trees, and the public/private key implementation to figure out what a document is a part of.
 #   Add shit ton of comments!!!
 #   Some kind of shared hash needs to be stored and then verified if it is unique, get people to type in a name,
@@ -34,7 +32,6 @@ import uuid
 #   against it
 #   Document needs to be able to accept any format, probably just accept json, needs a key so that the same "file" can
 #   can be updated in a db but generates new key for db so you have a db/document key pair for updates.
-#   * Step 3: Build a querying language BCQL/BQL, similar to a REST api to run CRUD statements, see Mongo???
 ########################################################################################################################
 
 
@@ -100,20 +97,36 @@ class Blockchain:
             block_index += 1
         return True
 
+    def encrypt_document(self, document):
+        return hashlib.sha256(document).encode().hexidigest()
+
+    def decrypt_document(self, document):
+        return hashlib.sha256(document).decode()
+
     # Document Creation #
-    # TODO: Handle existing key better, just try it again, in a while loop or somtehing
-    def create_document(self, database_key, document):
+    # TODO: Handle existing key better, just try it again, in a while loop or something
+    # TODO: Pass in public key for encryption, if below it true
+    # TODO: Encrypt document and make it optional, default it to encrypt and if no key is provided then fail
+    def create_document(self, database_key, document, encrypt):
         document_key = str(uuid.uuid4())
         previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document != 900:
             return 200
         self.database_key = database_key
-        self.document.append({
-            'document_key': document_key,
-            'version': 0,
-            'is_alive': True,
-            'document': document
-        })
+        if encrypt:
+            self.document.append({
+                'document_key': document_key,
+                'version': 0,
+                'is_alive': True,
+                'document': self.encrypt_document(document)
+            })
+        else:
+            self.document.append({
+                'document_key': document_key,
+                'version': 0,
+                'is_alive': True,
+                'document': document
+            })
         return 100, document_key
 
     # TODO: Find a more efficient way to do this
@@ -143,7 +156,6 @@ class Blockchain:
         return 101, document_keys
 
     # Document Queries #
-    # TODO: going to be the most complicated as need to be able to understand various user queries
     # simple select latest #
     def get_latest(self, database_key, document_key):
         return self.get_document(database_key, document_key, 'latest')
@@ -156,7 +168,6 @@ class Blockchain:
         return document
 
     # select all versions of a document #
-    # TODO: Get latest version, save version number and then loop through until you get to that number and return them
     def get_all_document_versions(self, database_key, document_key):
         documents_history = [self.get_document(database_key, document_key, 'latest')]
         latest_version = documents_history[0]['version']
@@ -169,25 +180,21 @@ class Blockchain:
         return documents_history
 
     # select multiple documents from a database but only latest version #
-    # TODO: loop through get_latest
     def get_multiple_latest(self, database_key, document_keys):
         return self.get_documents(database_key, document_keys, 'latest')
 
     # select all documents from a database but only latest version #
-    # TODO: loop through get_latest but find a way to not provide a doc key
     def get_all_documents(self, database_key):
         return self.get_documents(database_key, 0, 'all latest')
 
     # select specific versions for multiple documents #
-    # TODO: loop through get_specific_document_version
     def get_specific_document_versions(self, database_key, document_keys_version_pair):
         documents = []
         for document_key, version in document_keys_version_pair:
-            documents.append(self.get_specific_document_version(database_key,document_key, version))
+            documents.append(self.get_specific_document_version(database_key, document_key, version))
         return documents
 
     # select multiple documents and all versions from a db #
-    # TODO: Loop through the single equivalent
     def get_multiple_documents_and_versions(self, database_key, document_keys):
         documents = []
         for document_key in document_keys:
@@ -195,32 +202,42 @@ class Blockchain:
         return documents
 
     # select all documents and all versions from a db #
-    # TODO: Loop through single equivalent and figure out how not to provide a key
     def get_all_documents_and_versions(self, database_key):
         return self.get_documents(database_key, 0, 'all')
 
     # Document Updates #
-    def update_document(self, database_key, document_key, document):
+    def update_document(self, database_key, document_key, document, encrypt):
         previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document == 900:
             return 900
         if previous_document['is_alive']:
-            self.document.append(
-                {
-                    'database_key': database_key,
-                    'document_key': document_key,
-                    'version': previous_document['version']+1,
-                    'is_alive': True,
-                    'document': document
-                }
-            )
+            if encrypt:
+                self.document.append(
+                    {
+                        'database_key': database_key,
+                        'document_key': document_key,
+                        'version': previous_document['version']+1,
+                        'is_alive': True,
+                        'document': self.encrypt_document(document)
+                    }
+                )
+            else:
+                self.document.append(
+                    {
+                        'database_key': database_key,
+                        'document_key': document_key,
+                        'version': previous_document['version'] + 1,
+                        'is_alive': True,
+                        'document': document
+                    }
+                )
             return 500
         return 600
 
-    def update_multiple_documents(self, database_key, documents_keys_pair):
+    def update_multiple_documents(self, database_key, documents_keys_pair, encrypt):
         failures = []
         for key, document in documents_keys_pair:
-            return_code = self.update_document(database_key, key, document)
+            return_code = self.update_document(database_key, key, document, encrypt)
             if return_code != 500:
                 failures.append(
                     {
@@ -269,7 +286,48 @@ class Blockchain:
             return 801, failures
         return 701
 
-    # TODO: Implement queries, and merkel tress
+    # Resurrect a document - Don't do multiple as this should probably only be done one at a time #
+    def resurrect_document(self, database_key, document_key):
+        previous_document = self.get_document(database_key, document_key, 'latest')
+        if previous_document == 900:
+            return 900
+        if not previous_document['is_alive']:
+            self.document.append(
+                {
+                    'database_key': database_key,
+                    'document_key': document_key,
+                    'version': previous_document['version'] + 1,
+                    'is_alive': True,
+                    'document': previous_document['document']
+                }
+            )
+            return 1000
+        return 2000
+
+    # Restore a specific document version #
+    def restore_document(self, database_key, document_key, version):
+        old_document = self.get_specific_document_version(database_key, document_key, version)
+        return_code = self.update_document(database_key, document_key, old_document, False)
+
+        if return_code == 500:
+            return 3000
+        return 4000
+
+    # Just encrypt/decrypt text document #
+    def change_document_encryption(self, database_key, document_key, encryption):
+        document = self.get_latest(database_key, document_key)
+        # return_code = 0
+        if encryption == 'encrypt':
+            return_code = self.update_document(database_key, document_key, document, True)
+        elif encryption == 'decrypt':
+            return_code = self.update_document(database_key, document_key, self.decrypt_document(document), False)
+        else:
+            return 6000
+
+        if return_code == 500:
+            return 5000
+        return 6001
+
     def get_document(self, database_key, document_key, query, version=0):
         # TODO: Only store the db instead of the chain? Would make it more efficient to run multiple queries against
         #  same db
@@ -307,9 +365,11 @@ class Blockchain:
                 return 904
         elif query == 'all latest':
             for block in sorted(chain, reverse=True):
-                # TODO: This if will probably not work...
-                if block['database_key'] == database_key and block['document']['document_key'] not in documents:
-                    documents.append(block['document'])
+                # TODO: Do more efficiently...
+                if block['database_key'] == database_key:
+                    for document in documents:
+                        if block['document']['document_key'] != document['version']:
+                            documents.append(block['document'])
             if not documents:
                 return 905
         elif query == 'all':
@@ -317,7 +377,7 @@ class Blockchain:
                 if block['database_key'] == database_key:
                     documents.append(block['document'])
             if not documents:
-                return 906
+                return 905
         else:
             return 910
 
