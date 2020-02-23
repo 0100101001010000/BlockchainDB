@@ -4,9 +4,11 @@ Create
 200 - Error creating document
 201 - Error creating some documents
 202 - Error creating all documents
+203 - Unknown document creation error
 
 Read
 300 - Successfully read document
+301 - Successfully read multiple documents
 400 - Error reading document
 401 - Document version not provided
 402 - No document found
@@ -35,3 +37,19 @@ Retrieval errors
 
 910 - Query invalid
 999 - Call for help, something went horribly wrong
+
+Resurrection
+1000 - Document brought back from the dead
+2000 - Document couldn't be given life
+
+Document restoration
+3000 - Document successfully restored
+4000 - Issues restoring the document
+
+Encryption
+5000 - Document encryption successfully changed
+6000 - Issues changing the document encryption
+
+REST
+7000 - Incorrect format
+7001 - Database not provided
