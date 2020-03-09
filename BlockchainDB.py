@@ -1,10 +1,11 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import datetime
 import hashlib
 import json
 from urllib.parse import urlparse
 import requests
 import uuid
+
 
 ########################################################################################################################
 # TODO:
@@ -69,7 +70,7 @@ class Blockchain:
         new_proof = 1
         check_proof = False
         while check_proof is False:
-            hash_operation = hashlib.sha256(str(new_proof**2 - previous_proof**2).encode()).hexdigest()
+            hash_operation = hashlib.sha256(str(new_proof ** 2 - previous_proof ** 2).encode()).hexdigest()
             if hash_operation[:4] == '0000':
                 check_proof = True
             else:
@@ -90,7 +91,7 @@ class Blockchain:
                 return False
             previous_proof = previous_block['proof']
             proof = block['proof']
-            hash_operation = hashlib.sha256(str(proof**2 - previous_proof**2).encode()).hexidigest()
+            hash_operation = hashlib.sha256(str(proof ** 2 - previous_proof ** 2).encode()).hexidigest()
             if hash_operation[:4] == '0000':
                 return False
             previous_block = block
@@ -138,9 +139,9 @@ class Blockchain:
     # TODO: Encrypt document and make it optional, default it to encrypt and if no key is provided then fail
     def create_document(self, database_key, document, encrypt):
         document_key = str(uuid.uuid4())
-        previous_document = self.get_document(database_key, document_key, 'latest')
-        if previous_document != 900:
-            return 200
+        # previous_document = self.get_document(database_key, document_key, 'latest')
+        # if previous_document != 901:
+        #    return 200, 'Error - Document key already exists!'
         self.database_key = database_key
         if encrypt:
             self.document.append({
@@ -156,33 +157,40 @@ class Blockchain:
                 'is_alive': True,
                 'document': document
             })
-        return 100, document_key
+        previous_block = self.get_previous_block()
+        previous_proof = previous_block['proof']
+        proof = self.proof_of_work(previous_proof)
+        previous_hash = self.hash(previous_block)
+        self.create_block(proof, previous_hash)
+
+        return {100, document_key}
 
     # TODO: Find a more efficient way to do this
     def create_multiple_documents(self, database_key, documents, encrypt):
-        failures = []
-        document_keys = []
+        result = []
         for document in documents:
-            return_codes = self.create_document(database_key, document, encrypt)
-            for return_code, document_key in return_codes:
-                if return_code != 100:
-                    failures.append(
-                        {
-                            'document': document,
-                            'error': return_code
-                        }
-                    )
-                document_keys.append(
+            created_document = self.create_document(database_key, documents[document], encrypt)
+
+            for returned in created_document:
+                #                if return_code != 100:
+                #                   failures.append(
+                #                      {
+                #                         'document': documents[document],
+                #                        'error': return_code
+                #                   }
+                #              )
+                result.append(
                     {
-                        'document_key': document_key,
-                        'document': document
+                        'document_key': created_document[returned],
+                        'document': documents[document]
                     }
                 )
-        if len(failures) != 0:
-            if len(failures) == len(documents):
-                return 202, failures
-            return 201, document_keys, failures
-        return 101, document_keys
+        return result
+        # if len(failures) != 0:
+        #    if len(failures) == len(documents):
+        #        return 202, failures
+        #    return 201, document_keys, failures
+        # return 101, document_keys
 
     # Document Queries #
     # simple select latest #
@@ -428,7 +436,7 @@ class Blockchain:
 ########################################################################################################################
 ########################################################################################################################
 
-# TODO: Redo all of this to fit the above, and move away from Flask
+# TODO: Redo all of this
 
 # Flask
 app = Flask(__name__)
@@ -439,6 +447,7 @@ node_address = str(uuid.uuid4()).replace('-', '')
 blockchain = Blockchain()
 
 
+# TODO: No longer needed?
 @app.route('/mine_block', methods=['GET'])
 def mine_block():
     previous_block = blockchain.get_previous_block()
@@ -454,7 +463,7 @@ def mine_block():
         'proof': block['proof'],
         'previous_hash': block['previous_hash'],
         'transactions': block['transactions']
-                }
+    }
     return jsonify(response), 200
 
 
@@ -468,9 +477,10 @@ def get_chain():
 
     return jsonify(response), 200
 
-@app.route('/connect_node', method=['POST'])
+
+@app.route('/connect_node', methods=['POST'])
 def connect_node():
-    json_file = requests.get_json()
+    json_file = request.get_json(force=True)
     nodes = json_file.get('nodes')
 
     if nodes is None:
@@ -484,7 +494,7 @@ def connect_node():
     return jsonify(response), 201
 
 
-@app.route('/replace_chain', method=['GET'])
+@app.route('/replace_chain', methods=['GET'])
 def replace_chain():
     replace_chain_bool = blockchain.replace_chain()
 
@@ -497,30 +507,34 @@ def replace_chain():
 ## Queries ##
 # Create a document
 # create_document(self, database_key, document, encrypt)
-@app.route('/create_document', method=['POST'])
+@app.route('/create_document', methods=['POST'])
 def create_document():
-    json_file = requests.get_json()
+    json_file = request.get_json()
+    if json_file is None:
+        return f'Error - {json_file}'
+
     transaction_keys = ['database_key', 'document', 'encrypt']
 
     if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided'
+        return '7000 , Incorrect format provided'
 
     if json_file['database_key'] == 0:
-        return 7001, 'Please provide a db key'
+        return '7001 ,lease provide a db key'
 
     document_key = blockchain.create_document(json_file['database_key'], json_file['document'], json_file['encrypt'])
     if document_key[0] == 100:
         response = {'message': f'New key for document: {document_key[1]}'}
-        return 100, jsonify(response)
+        # return f'100 , {jsonify(response)}'
+        return jsonify(response)
     else:
         response = {'message': f'Issue creating document: {document_key[1]}'}
-        return document_key[0], jsonify(response)
+        return f'{document_key[0]}, Issue creating document: {document_key[1]}'  # {jsonify(response)}
 
 
 # create_multiple_documents(self, database_key, documents, encrypt)
-@app.route('/create_documents', method=['POST'])
+@app.route('/create_documents', methods=['POST'])
 def create_documents():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'documents', 'encrypt']
 
     if not all(key in json_file for key in transaction_keys):
@@ -529,13 +543,15 @@ def create_documents():
     if json_file['database_key'] == 0:
         return 7001, 'Please provide a db key'
 
-    document_keys = blockchain.create_multiple_documents(json_file['database_key'], json_file['documents'], json_file['encrypt'])
+    document_keys = blockchain.create_multiple_documents(json_file['database_key'], json_file['documents'],
+                                                         json_file['encrypt'])
 
     if document_keys[0] == 101:
         response = {'message': f'New keys for document: {document_keys[1]}'}
         return 101, jsonify(response)
     elif document_keys[0] == 201:
-        response = {'message': f'Issue creating some of the documents: {document_keys[2]}, but some were created {document_keys[1]}'}
+        response = {
+            'message': f'Issue creating some of the documents: {document_keys[2]}, but some were created {document_keys[1]}'}
         return 201, jsonify(response)
     elif document_keys[0] == 202:
         response = {'message': f'Issue creating all documents: {document_keys[1]}'}
@@ -546,9 +562,9 @@ def create_documents():
 
 
 # get_latest(self, database_key, document_key)#
-@app.route('/get_latest', method=['POST'])
+@app.route('/get_latest', methods=['POST'])
 def get_latest():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key']
 
     if not all(key in json_file for key in transaction_keys):
@@ -564,7 +580,7 @@ def get_latest():
     if document[0] == 300:
         response = {
             'message': 'Document successfully retrieved',
-            'document':  document[1]
+            'document': document[1]
         }
         return 300, jsonify(response)
     else:
@@ -573,9 +589,9 @@ def get_latest():
 
 
 # get_specific_document_version(self, database_key, document_key, version):
-@app.route('/get_version', method=['POST'])
+@app.route('/get_version', methods=['POST'])
 def get_version():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key', 'version']
 
     if not all(key in json_file for key in transaction_keys):
@@ -586,12 +602,13 @@ def get_version():
     elif json_file['document_key'] == 0:
         return 7002, 'Please provide a document key'
 
-    document = blockchain.get_specific_document_version(json_file['database_key'], json_file['document_key'], json_file['version'])
+    document = blockchain.get_specific_document_version(json_file['database_key'], json_file['document_key'],
+                                                        json_file['version'])
 
     if document[0] == 300:
         response = {
             'message': f'Document version {json_file["version"]} successfully retrieved',
-            'document':  document[1]
+            'document': document[1]
         }
         return 300, jsonify(response)
     else:
@@ -600,9 +617,9 @@ def get_version():
 
 
 # get_all_document_versions(self, database_key, document_key)
-@app.route('/get_all_version', method=['POST'])
+@app.route('/get_all_version', methods=['POST'])
 def get_all_versions():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key']
 
     if not all(key in json_file for key in transaction_keys):
@@ -627,9 +644,9 @@ def get_all_versions():
 
 
 # get_multiple_latest(self, database_key, document_keys)
-@app.route('/get_multiple_documents', method=['POST'])
+@app.route('/get_multiple_documents', methods=['POST'])
 def get_multiple_documents():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_keys']
 
     if not all(key in json_file for key in transaction_keys):
@@ -654,9 +671,9 @@ def get_multiple_documents():
 
 
 # get_all_documents(self, database_key)
-@app.route('/get_all_db_documents', method=['POST'])
+@app.route('/get_all_db_documents', methods=['POST'])
 def get_all_db_documents():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key']
 
     if not all(key in json_file for key in transaction_keys):
@@ -679,9 +696,9 @@ def get_all_db_documents():
 
 
 # update_document(self, database_key, document_key, document, encrypt)
-@app.route('/update_document', method=['POST'])
+@app.route('/update_document', methods=['POST'])
 def update_document():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key', 'document', 'encrypt']
 
     if not all(key in json_file for key in transaction_keys):
@@ -694,7 +711,8 @@ def update_document():
     elif json_file['document'] is None:
         return 7003, 'Please provide a document'
 
-    document = blockchain.update_document(json_file['database_key'], json_file['document_key'], json_file['document'], json_file['encrypt'])
+    document = blockchain.update_document(json_file['database_key'], json_file['document_key'], json_file['document'],
+                                          json_file['encrypt'])
 
     if document == 500:
         response = {
@@ -707,9 +725,9 @@ def update_document():
 
 
 # delete_document(self, database_key, document_key)
-@app.route('/delete_document', method=['POST'])
+@app.route('/delete_document', methods=['POST'])
 def delete_document():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key']
 
     if not all(key in json_file for key in transaction_keys):
@@ -733,9 +751,9 @@ def delete_document():
 
 
 # resurrect_document(self, database_key, document_key)
-@app.route('/resurrect_document', method=['POST'])
+@app.route('/resurrect_document', methods=['POST'])
 def resurrect_document():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key']
 
     if not all(key in json_file for key in transaction_keys):
@@ -759,9 +777,9 @@ def resurrect_document():
 
 
 # restore_document(self, database_key, document_key, version)
-@app.route('/restore_document', method=['POST'])
+@app.route('/restore_document', methods=['POST'])
 def restore_document():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key', 'version']
 
     if not all(key in json_file for key in transaction_keys):
@@ -787,9 +805,9 @@ def restore_document():
 
 
 # change_document_encryption(self, database_key, document_key, encryption)
-@app.route('/change_encryption', method=['POST'])
+@app.route('/change_encryption', methods=['POST'])
 def change_encryption():
-    json_file = requests.get_json()
+    json_file = request.get_json()
     transaction_keys = ['database_key', 'document_key', 'encryption']
 
     if not all(key in json_file for key in transaction_keys):
@@ -802,7 +820,8 @@ def change_encryption():
     elif json_file['encryption'] is None:
         return 7003, 'Please provide a version'
 
-    document = blockchain.change_document_encryption(json_file['database_key'], json_file['document_key'], json_file['encryption'])
+    document = blockchain.change_document_encryption(json_file['database_key'], json_file['document_key'],
+                                                     json_file['encryption'])
 
     if document == 5000:
         response = {
@@ -815,3 +834,8 @@ def change_encryption():
 
 
 app.run(host='0.0.0.0', port=5000)
+
+
+def for_tests():
+    test_app = Flask(__name__)
+    test_app.run(host='0.0.0.0', port=5000)
