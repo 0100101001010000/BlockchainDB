@@ -193,11 +193,11 @@ class Blockchain:
     # select all versions of a document #
     def get_all_document_versions(self, database_key, document_key):
         latest_document = self.get_document(database_key, document_key, 'latest')
-        
+
         if latest_document['return code'] != 300:
             return latest_document
 
-        latest_version = latest_document['return info']['document']['version']
+        latest_version = latest_document['return info']['version']
 
         documents_history = {f'version {latest_version}': latest_document}
 

@@ -87,6 +87,7 @@ def test_get_version():
     assert b'Document version 0 successfully retrieved' in chain.data
 
 
+# TODO: check if it does get all versions after an update
 def test_get_all_versions():
     database_key = str(uuid.uuid4())
     doc_creation = app.test_client().post('/create_documents', json={
