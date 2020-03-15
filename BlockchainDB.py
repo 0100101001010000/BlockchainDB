@@ -202,122 +202,75 @@ class Blockchain:
         documents_history = {f'version {latest_version}': latest_document}
 
         for version in range(latest_version):
-            current_document = self.get_document(database_key, documents_history, 'version', version)
-            documents_history = {f'version {current_document["document"]["version"]}': current_document}
+            current_document = self.get_document(database_key, document_key, 'version', version)
+            if current_document['return code'] != 300:
+                return current_document
+            documents_history = {f'version {current_document["return info"]["version"]}': current_document}
 
         return {'return code': 301, 'return info': documents_history}
 
-    # select multiple documents from a database but only latest version #
-    def get_multiple_latest(self, database_key, document_keys):
-        return self.get_documents(database_key, document_keys, 'latest')
-
     # select all documents from a database but only latest version #
     def get_all_documents(self, database_key):
-        return self.get_documents(database_key, 0, 'all latest')
-
-    # select specific versions for multiple documents #
-    # TODO: Is this needed?
-    def get_specific_document_versions(self, database_key, document_keys_version_pair):
-        documents = []
-        for document_key, version in document_keys_version_pair:
-            documents.append(self.get_specific_document_version(database_key, document_key, version))
-        return documents
-
-    # select multiple documents and all versions from a db #
-    # TODO: Same here, people should just loop through?
-    def get_multiple_documents_and_versions(self, database_key, document_keys):
-        documents = []
-        for document_key in document_keys:
-            documents.append(self.get_all_document_versions(database_key, document_key))
-        return documents
-
-    # select all documents and all versions from a db #
-    # TODO: Same here, people should just loop through?
-    def get_all_documents_and_versions(self, database_key):
-        return self.get_documents(database_key, 0, 'all')
+        return self.get_document(database_key, 0, 'all latest')
 
     # Document Updates #
     def update_document(self, database_key, document_key, document, encrypt):
         previous_document = self.get_document(database_key, document_key, 'latest')
-        if previous_document == 900:
-            return 900
-        if previous_document[1]['is_alive']:
+        if previous_document['return code'] != 300:
+            return previous_document
+
+        self.database_key = database_key
+
+        if previous_document['return info']['document']:
             if encrypt:
-                self.document.append(
-                    {
-                        #database key: database_key,
+                self.document = {
                         'document key': document_key,
-                        'version': previous_document[1]['version'] + 1,
+                        'version': previous_document['return info']['version'] + 1,
                         'is alive': True,
                         'document': self.encrypt_document(document)
                     }
-                )
             else:
-                self.document.append(
-                    {
-                        #'database key': database_key,
+                self.document = {
                         'document key': document_key,
-                        'version': previous_document[1]['version'] + 1,
-                        #'is alive': True,
+                        'version': previous_document['return info']['version'] + 1,
+                        'is alive': True,
                         'document': document
                     }
-                )
-            return 500
-        return 600
 
-    # TODO: Is this needed or should people loop through?
-    def update_multiple_documents(self, database_key, documents_keys_pair, encrypt):
-        failures = []
-        for key, document in documents_keys_pair:
-            return_code = self.update_document(database_key, key, document, encrypt)
-            if return_code != 500:
-                failures.append(
-                    {
-                        'key': key,
-                        'error': return_code
-                    }
-                )
-        if len(failures) != 0:
-            if len(failures) == len(documents_keys_pair):
-                return 602
-            return 601, failures
-        return 501
+            previous_block = self.get_previous_block()
+            previous_proof = previous_block['proof']
+            proof = self.proof_of_work(previous_proof)
+            previous_hash = self.hash(previous_block)
+            self.create_block(proof, previous_hash)
+
+            return {'return code': 500, 'return message': 'Document successfully updated'}
+        return {'return code': 600, 'return message': 'Issue updating the document'}
 
     # Document Deletion #
     def delete_document(self, database_key, document_key):
         previous_document = self.get_document(database_key, document_key, 'latest')
-        if previous_document == 900:
-            return 900
-        if not previous_document[1]['is_alive']:
-            return 800
-        self.document.append(
-            {
-                #'database key': database_key,
-                'document key': document_key,
-                'version': previous_document[1]['version'] + 1,
-                'is alive': False,
-                'document': previous_document[1]['document']
-            }
-        )
-        return 700
+        if previous_document['return code'] != 300:
+            return previous_document
 
-    # TODO: Is this needed or should people loop through?
-    def delete_multiple_documents(self, database_key, document_keys):
-        failures = []
-        for key in document_keys:
-            return_code = self.delete_document(database_key, key)
-            if return_code != 700:
-                failures.append(
-                    {
-                        'key': key,
-                        'error': return_code
-                    }
-                )
-        if len(failures) != 0:
-            if len(document_keys) == len(failures):
-                return 802
-            return 801, failures
-        return 701
+        if not previous_document['return info']['is alive']:
+            return {'return code': 800, 'return message': 'Document is already dead'}
+
+        self.database_key = database_key
+
+        self.document = {
+                'document key': document_key,
+                'version': previous_document['return info']['version'] + 1,
+                'is alive': False,
+                'document': previous_document['return info']['document']
+            }
+
+        previous_block = self.get_previous_block()
+        previous_proof = previous_block['proof']
+        proof = self.proof_of_work(previous_proof)
+        previous_hash = self.hash(previous_block)
+        self.create_block(proof, previous_hash)
+
+        return {'return code': 700, 'return message': 'Document successfully deleted'}
 
     # Resurrect a document - Don't do multiple as this should probably only be done one at a time #
     def resurrect_document(self, database_key, document_key):
@@ -327,7 +280,6 @@ class Blockchain:
         if not previous_document[1]['is_alive']:
             self.document.append(
                 {
-                    #'database key': database_key,
                     'document key': document_key,
                     'version': previous_document[1]['version'] + 1,
                     'is alive': True,
@@ -380,6 +332,8 @@ class Blockchain:
             }
         elif query == 'version':
             for block in chain:
+                print(block)
+                print(version)
                 if block['database key'] == database_key and block['document']['document key'] == document_key and block['document']['version'] == version:
                     return {
                         'return code': 300,
@@ -389,50 +343,25 @@ class Blockchain:
                 'return code': 902,
                 'return info': 'Document version not found'
             }
+        elif query == 'all latest':
+            documents = {}
+            for block in sorted(chain, key=lambda x: x['index'], reverse=True):
+                if block['database key'] == database_key and block['document']['document key'] not in documents:
+                    documents[block['document']['document key']] = block['document']
+            if documents != {}:
+                return {
+                    'return code': 301,
+                    'return info': documents
+                }
+            return {
+                'return code': 903,
+                'return info': 'Documents not found'
+            }
         else:
             return {
                 'return code': 910,
                 'return info': 'Query invalid'
             }
-
-    # TODO: Only allow queries from the same db key for now
-    def get_documents(self, database_key, document_keys, query, versions=0):
-        chain = self.chain
-        documents = []
-        if query == 'latest':
-            for block in sorted(chain, reverse=True):
-                if block['database key'] == database_key and block['document']['document_key'] in document_keys:
-                    documents.append(block['document'])
-            if not documents:
-                return 903
-        elif query == 'version':
-            for block in chain:
-                if block['database key'] == database_key and block['document']['document_key'] in document_keys and \
-                        block['document']['version'] in versions:
-                    documents.append(block['document'])
-            if not documents:
-                return 904
-        elif query == 'all latest':
-            for block in sorted(chain, reverse=True):
-                # TODO: Do more efficiently...
-                if block['database key'] == database_key:
-                    for document in documents:
-                        if block['document']['document_key'] != document['version']:
-                            documents.append(block['document'])
-            if not documents:
-                return 905
-        elif query == 'all':
-            for block in chain:
-                if block['database key'] == database_key:
-                    documents.append(block['document'])
-            if not documents:
-                return 905
-        else:
-            return 910
-
-        if not documents:
-            return 999
-        return 301, documents
 
 
 ########################################################################################################################
@@ -626,7 +555,7 @@ def get_all_versions():
     if not all(key in json_file for key in transaction_keys):
         return jsonify({'message': 'Incorrect format provided'})
 
-    if json_file['database key'] == 0:
+    if json_file['database key'] == '':
         return jsonify({'message': 'Please provide a db key'})
     elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
@@ -644,33 +573,6 @@ def get_all_versions():
         return jsonify(response)
 
 
-# get_multiple_latest(self, database_key, document_keys)
-@app.route('/get_multiple_documents', methods=['POST'])
-def get_multiple_documents():
-    json_file = request.get_json()
-    transaction_keys = ['database key', 'document_keys']
-
-    if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided',
-
-    if json_file['database key'] == 0:
-        return 7001, 'Please provide a db key'
-    elif json_file['document_keys'] == 0:
-        return 7002, 'Please provide a document key'
-
-    document = blockchain.get_multiple_latest(json_file['database key'], json_file['document_key'])
-
-    if document[0] == 301:
-        response = {
-            'message': f'All documents successfully retrieved',
-            'document': document[1]
-        }
-        return 301, jsonify(response)
-    else:
-        response = {'message': f'Issue retrieving the document {document}'}
-        return 400, jsonify(response)
-
-
 # get_all_documents(self, database_key)
 @app.route('/get_all_db_documents', methods=['POST'])
 def get_all_db_documents():
@@ -678,84 +580,84 @@ def get_all_db_documents():
     transaction_keys = ['database key']
 
     if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided',
+        return jsonify({'message': 'Incorrect format provided'})
 
-    if json_file['database key'] == 0:
-        return 7001, 'Please provide a db key'
+    if json_file['database key'] == '':
+        return jsonify({'message': 'Please provide a db key'})
 
     document = blockchain.get_all_documents(json_file['database key'])
 
-    if document[0] == 301:
+    if document['return code'] == 301:
         response = {
             'message': f'All documents successfully retrieved',
-            'document': document[1]
+            'document': document['return info']
         }
-        return 300, jsonify(response)
+        return jsonify(response)
     else:
         response = {'message': f'Issue retrieving the document {document}'}
-        return 400, jsonify(response)
+        return jsonify(response)
 
 
 # update_document(self, database_key, document_key, document, encrypt)
 @app.route('/update_document', methods=['POST'])
 def update_document():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'document_key', 'document', 'encrypt']
+    transaction_keys = ['database key', 'document key', 'document', 'encrypt']
 
     if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided',
+        return jsonify({'message': 'Incorrect format provided'})
 
-    if json_file['database key'] == 0:
-        return 7001, 'Please provide a db key'
-    elif json_file['document_keys'] == 0:
-        return 7002, 'Please provide a document key'
+    if json_file['database key'] == '':
+        return jsonify({'message': 'Please provide a db key'})
+    elif json_file['document key'] == 0:
+        return jsonify({'message': 'Please provide a document key'})
     elif json_file['document'] is None:
-        return 7003, 'Please provide a document'
+        return jsonify({'message': 'Please provide a document'})
 
-    document = blockchain.update_document(json_file['database key'], json_file['document_key'], json_file['document'],
+    document = blockchain.update_document(json_file['database key'], json_file['document key'], json_file['document'],
                                           json_file['encrypt'])
 
     if document == 500:
         response = {
             'message': f'Document successfully updated'
         }
-        return 500, jsonify(response)
+        return jsonify(response)
     else:
         response = {'message': f'Issue retrieving the document: {document}'}
-        return 600, jsonify(response)
+        return jsonify(response)
 
 
 # delete_document(self, database_key, document_key)
 @app.route('/delete_document', methods=['POST'])
 def delete_document():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'document_key']
+    transaction_keys = ['database key', 'document key']
 
     if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided',
+        return jsonify({'message': 'Incorrect format provided'})
 
-    if json_file['database key'] == 0:
-        return 7001, 'Please provide a db key'
-    elif json_file['document_keys'] == 0:
-        return 7002, 'Please provide a document key'
+    if json_file['database key'] == '':
+        return jsonify({'message': 'Please provide a db key'})
+    elif json_file['document key'] == 0:
+        return jsonify({'message': 'Please provide a document key'})
 
-    document = blockchain.delete_document(json_file['database key'], json_file['document_key'])
+    document = blockchain.delete_document(json_file['database key'], json_file['document key'])
 
-    if document == 700:
+    if document['return code'] == 700:
         response = {
             'message': f'Document successfully deleted'
         }
-        return 700, jsonify(response)
+        return jsonify(response)
     else:
         response = {'message': f'Issue deleting the document: {document}'}
-        return 800, jsonify(response)
+        return jsonify(response)
 
 
 # resurrect_document(self, database_key, document_key)
 @app.route('/resurrect_document', methods=['POST'])
 def resurrect_document():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'document_key']
+    transaction_keys = ['database key', 'document key']
 
     if not all(key in json_file for key in transaction_keys):
         return 7000, 'Incorrect format provided',
@@ -765,7 +667,7 @@ def resurrect_document():
     elif json_file['document_keys'] == 0:
         return 7002, 'Please provide a document key'
 
-    document = blockchain.resurrect_document(json_file['database key'], json_file['document_key'])
+    document = blockchain.resurrect_document(json_file['database key'], json_file['document key'])
 
     if document == 1000:
         response = {
@@ -781,7 +683,7 @@ def resurrect_document():
 @app.route('/restore_document', methods=['POST'])
 def restore_document():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'document_key', 'version']
+    transaction_keys = ['database key', 'document key', 'version']
 
     if not all(key in json_file for key in transaction_keys):
         return 7000, 'Incorrect format provided',
@@ -793,7 +695,7 @@ def restore_document():
     elif json_file['version'] is None:
         return 7003, 'Please provide a version'
 
-    document = blockchain.restore_document(json_file['database key'], json_file['document_key'], json_file['version'])
+    document = blockchain.restore_document(json_file['database key'], json_file['document key'], json_file['version'])
 
     if document == 3000:
         response = {
@@ -809,7 +711,7 @@ def restore_document():
 @app.route('/change_encryption', methods=['POST'])
 def change_encryption():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'document_key', 'encryption']
+    transaction_keys = ['database key', 'document key', 'encryption']
 
     if not all(key in json_file for key in transaction_keys):
         return 7000, 'Incorrect format provided',
@@ -821,7 +723,7 @@ def change_encryption():
     elif json_file['encryption'] is None:
         return 7003, 'Please provide a version'
 
-    document = blockchain.change_document_encryption(json_file['database key'], json_file['document_key'],
+    document = blockchain.change_document_encryption(json_file['database key'], json_file['document key'],
                                                      json_file['encryption'])
 
     if document == 5000:
