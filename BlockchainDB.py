@@ -275,28 +275,37 @@ class Blockchain:
     # Resurrect a document - Don't do multiple as this should probably only be done one at a time #
     def resurrect_document(self, database_key, document_key):
         previous_document = self.get_document(database_key, document_key, 'latest')
-        if previous_document == 900:
-            return 900
-        if not previous_document[1]['is_alive']:
-            self.document.append(
-                {
-                    'document key': document_key,
-                    'version': previous_document[1]['version'] + 1,
-                    'is alive': True,
-                    'document': previous_document[1]['document']
-                }
-            )
-            return 1000
-        return 2000
+        if previous_document['return code'] != 300:
+            return previous_document
+
+        if previous_document['return info']['is alive']:
+            return {'return code': 800, 'return message': 'Document is alive'}
+
+        self.database_key = database_key
+
+        self.document = {
+            'document key': document_key,
+            'version': previous_document['return info']['version'] + 1,
+            'is alive': True,
+            'document': previous_document['return info']['document']
+        }
+
+        previous_block = self.get_previous_block()
+        previous_proof = previous_block['proof']
+        proof = self.proof_of_work(previous_proof)
+        previous_hash = self.hash(previous_block)
+        self.create_block(proof, previous_hash)
+
+        return {'return code': 1000, 'return message': 'Document successfully resurrected'}
 
     # Restore a specific document version #
     def restore_document(self, database_key, document_key, version):
         old_document = self.get_specific_document_version(database_key, document_key, version)
-        return_code = self.update_document(database_key, document_key, old_document, False)
+        return_code = self.update_document(database_key, document_key, old_document['return info']['document'], False)
 
-        if return_code == 500:
-            return 3000
-        return 4000
+        if return_code['return code'] != 500:
+            return {'return code': 4000, 'return info': f'Issues restoring the document: {return_code}'}
+        return {'return code': 3000, 'return info': 'Document successfully restored'}
 
     # Just encrypt/decrypt text document #
     def change_document_encryption(self, database_key, document_key, encryption):
@@ -307,11 +316,11 @@ class Blockchain:
         elif encryption == 'decrypt':
             return_code = self.update_document(database_key, document_key, self.decrypt_document(document), False)
         else:
-            return 6000
+            return {'return code': 6000, 'return info': 'Incorrect encryption type'}
 
-        if return_code == 500:
-            return 5000
-        return 6001
+        if return_code['return code'] != 500:
+            return {'return code': 6001, 'return info': f'Issues changing the document encryption {return_code}'}
+        return {'return code': 5000, 'return info': 'Encryption successfully changed'}
 
     def get_document(self, database_key, document_key, query, version=0):
         # TODO: Only store the db instead of the chain? Would make it more efficient to run multiple queries against
@@ -446,7 +455,7 @@ def create_document():
     if json_file is None:
         return f'Error - {json_file}'
 
-    transaction_keys = ['database key', 'document', 'encrypt']
+    transaction_keys = ['database key', 'document']
 
     if not all(key in json_file for key in transaction_keys):
         return jsonify({'message': 'Incorrect format provided'})
@@ -609,7 +618,7 @@ def update_document():
 
     if json_file['database key'] == '':
         return jsonify({'message': 'Please provide a db key'})
-    elif json_file['document key'] == 0:
+    elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
     elif json_file['document'] is None:
         return jsonify({'message': 'Please provide a document'})
@@ -638,7 +647,7 @@ def delete_document():
 
     if json_file['database key'] == '':
         return jsonify({'message': 'Please provide a db key'})
-    elif json_file['document key'] == 0:
+    elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
 
     document = blockchain.delete_document(json_file['database key'], json_file['document key'])
@@ -660,23 +669,23 @@ def resurrect_document():
     transaction_keys = ['database key', 'document key']
 
     if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided',
+        return jsonify({'message': 'Incorrect format provided'})
 
-    if json_file['database key'] == 0:
-        return 7001, 'Please provide a db key'
-    elif json_file['document_keys'] == 0:
-        return 7002, 'Please provide a document key'
+    if json_file['database key'] == '':
+        return jsonify({'message': 'Please provide a db key'})
+    elif json_file['document key'] == '':
+        return jsonify({'message': 'Please provide a document key'})
 
     document = blockchain.resurrect_document(json_file['database key'], json_file['document key'])
 
-    if document == 1000:
+    if document['return code'] == 1000:
         response = {
             'message': f'Document successfully resurrected'
         }
-        return 1000, jsonify(response)
+        return jsonify(response)
     else:
         response = {'message': f'Issue resurrecting the document: {document}'}
-        return 2000, jsonify(response)
+        return jsonify(response)
 
 
 # restore_document(self, database_key, document_key, version)
@@ -686,14 +695,14 @@ def restore_document():
     transaction_keys = ['database key', 'document key', 'version']
 
     if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided',
+        return jsonify({'message': 'Incorrect format provided'})
 
-    if json_file['database key'] == 0:
-        return 7001, 'Please provide a db key'
-    elif json_file['document_keys'] == 0:
-        return 7002, 'Please provide a document key'
+    if json_file['database key'] == '':
+        return jsonify({'message': 'Please provide a db key'})
+    elif json_file['document key'] == '':
+        return jsonify({'message': 'Please provide a document key'})
     elif json_file['version'] is None:
-        return 7003, 'Please provide a version'
+        return jsonify({'message': 'Please provide a version'})
 
     document = blockchain.restore_document(json_file['database key'], json_file['document key'], json_file['version'])
 
@@ -701,27 +710,27 @@ def restore_document():
         response = {
             'message': f'Document successfully restored'
         }
-        return 3000, jsonify(response)
+        return jsonify(response)
     else:
         response = {'message': f'Issue restoring the document: {document}'}
-        return 4000, jsonify(response)
+        return jsonify(response)
 
 
 # change_document_encryption(self, database_key, document_key, encryption)
 @app.route('/change_encryption', methods=['POST'])
 def change_encryption():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'document key', 'encryption']
+    transaction_keys = ['database key', 'document key', 'encrypt']
 
     if not all(key in json_file for key in transaction_keys):
-        return 7000, 'Incorrect format provided',
+        return jsonify({'message': 'Incorrect format provided'})
 
-    if json_file['database key'] == 0:
-        return 7001, 'Please provide a db key'
-    elif json_file['document_keys'] == 0:
-        return 7002, 'Please provide a document key'
+    if json_file['database key'] == '':
+        return jsonify({'message': 'Please provide a db key'})
+    elif json_file['document key'] == '':
+        return jsonify({'message': 'Please provide a document key'})
     elif json_file['encryption'] is None:
-        return 7003, 'Please provide a version'
+        return jsonify({'message': 'Please provide a version'})
 
     document = blockchain.change_document_encryption(json_file['database key'], json_file['document key'],
                                                      json_file['encryption'])
@@ -730,15 +739,10 @@ def change_encryption():
         response = {
             'message': f'Encryption successfully changed'
         }
-        return 5000, jsonify(response)
+        return jsonify(response)
     else:
         response = {'message': f'Issue changing the encryption: {document}'}
-        return 6000, jsonify(response)
+        return jsonify(response)
 
 
 app.run(host='0.0.0.0', port=5000)
-
-
-def for_tests():
-    test_app = Flask(__name__)
-    test_app.run(host='0.0.0.0', port=5000)

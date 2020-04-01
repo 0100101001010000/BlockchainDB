@@ -2,6 +2,9 @@ import pytest
 import json
 from BlockchainDB import app
 import uuid
+from Crypto.PublicKey import RSA
+from Crypto.Random import get_random_bytes
+from Crypto.Cipher import AES, PKCS1_OAEP
 
 # TODO: Test errors!
 
@@ -16,7 +19,8 @@ def test_create_document():
     chain = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_create_document test document',
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Document successfully created' in chain.data
 
@@ -32,7 +36,8 @@ def test_create_multiple_documents():
             'document4': 'test_create_multiple_documents test document 4',
             'document5': 'test_create_multiple_documents test document 5',
         },
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Documents successfully created' in chain.data
 
@@ -49,7 +54,8 @@ def test_get_latest():
             'document4': 'test_get_latest test document 4',
             'document5': 'test_get_latest test document 5',
         },
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Documents successfully created' in doc_creation.data
 
@@ -75,7 +81,8 @@ def test_get_version():
             'document4': 'test_get_version test document 4',
             'document5': 'test_get_version test document 5',
         },
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Documents successfully created' in doc_creation.data
 
@@ -119,7 +126,8 @@ def test_get_all_versions():
             'document4': 'test_get_versions test document 4',
             'document5': 'test_get_versions test document 5',
         },
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Documents successfully created' in doc_creation.data
 
@@ -161,7 +169,8 @@ def test_get_all_db_documents():
             'document4': 'test_get_all_db_documents test document 4',
             'document5': 'test_get_all_db_documents test document 5',
         },
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Documents successfully created' in doc_creation.data
 
@@ -177,7 +186,8 @@ def test_update_document():
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_update_document test document',
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Document successfully created' in doc_creation.data
 
@@ -199,7 +209,8 @@ def test_delete_document():
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_delete_document test document',
-        'encrypt': 'True'})
+        'encrypt': 'True'
+    })
 
     assert b'Document successfully created' in doc_creation.data
 
@@ -209,6 +220,205 @@ def test_delete_document():
     chain = app.test_client().post('/delete_document', json={
         'database key': database_key,
         'document key': doc_key,
+        'encrypt': 'True'
     })
 
     assert b'Document successfully deleted' in chain.data
+
+
+def test_resurrect_document():
+    database_key = str(uuid.uuid4())
+    doc_creation = app.test_client().post('/create_document', json={
+        'database key': database_key,
+        'document': 'test_resurrect_document test document',
+        'encrypt': 'True'
+    })
+
+    assert b'Document successfully created' in doc_creation.data
+
+    json_file = json.loads(doc_creation.data)
+    doc_key = json_file['document key']
+
+    doc_deletion = app.test_client().post('/delete_document', json={
+        'database key': database_key,
+        'document key': doc_key,
+        'encrypt': 'True'
+    })
+
+    assert b'Document successfully deleted' in doc_deletion.data
+
+    chain = app.test_client().post('/resurrect_document', json={
+        'database key': database_key,
+        'document key': doc_key,
+        'encrypt': 'True'
+    })
+
+
+def test_restore_document():
+    database_key = str(uuid.uuid4())
+    doc_creation = app.test_client().post('/create_document', json={
+        'database key': database_key,
+        'document': 'test_restore_document test document',
+        'encrypt': 'True'
+    })
+
+    assert b'Document successfully created' in doc_creation.data
+
+    json_file = json.loads(doc_creation.data)
+    doc_key = json_file['document key']
+
+    doc_update = app.test_client().post('/update_document', json={
+        'database key': database_key,
+        'document key': doc_key,
+        'document': 'test_update_document test document update',
+        'encrypt': 'True'
+    })
+
+    assert b'Document successfully updated' in doc_update.data
+
+    chain = app.test_client().post('/restore_document', json={
+        'database key': database_key,
+        'document key': doc_key,
+        'version': 0
+    })
+
+    assert b'Document successfully restored' in chain.data
+
+
+def test_string_encryption():
+    key = RSA.generate(2048)
+    private_key = key.export_key()
+    file_out = open("test_string_encryption_private.pem", "wb")
+    file_out.write(private_key)
+    file_out.close()
+
+    public_key = key.publickey().export_key()
+    file_out = open("test_string_encryption_receiver.pem", "wb")
+    file_out.write(public_key)
+    file_out.close()
+
+    document = "test_encryption test document".encode("utf-8")
+
+    recipient_key = RSA.import_key(open("test_string_encryption_receiver.pem").read())
+    session_key = get_random_bytes(16)
+
+    cipher_rsa = PKCS1_OAEP.new(recipient_key)
+    enc_session_key = cipher_rsa.encrypt(session_key)
+
+    cipher_aes = AES.new(session_key, AES.MODE_EAX)
+    ciphertext, tag = cipher_aes.encrypt_and_digest(document)
+
+    encrypted_string = enc_session_key
+    encrypted_string += cipher_aes.nonce
+    encrypted_string += tag
+    encrypted_string += ciphertext
+
+    private_key_retrieved = RSA.import_key(open("test_string_encryption_private.pem").read())
+
+    position = private_key_retrieved.size_in_bytes()
+    enc_session_key_retrieved = encrypted_string[:position]
+    nonce_retrieved = encrypted_string[position:position+16]
+    position += 16
+    tag_retrieved = encrypted_string[position:position+16]
+    position += 16
+    ciphertext_retrieved = encrypted_string[position:]
+
+    assert enc_session_key_retrieved == enc_session_key
+    assert nonce_retrieved == cipher_aes.nonce
+    assert tag_retrieved == tag
+    assert ciphertext_retrieved == ciphertext
+
+    cipher_rsa_retrieved = PKCS1_OAEP.new(private_key_retrieved)
+
+    session_key = cipher_rsa_retrieved.decrypt(enc_session_key_retrieved)
+
+    cipher_aes_retrieved = AES.new(session_key, AES.MODE_EAX, nonce_retrieved)
+    data = cipher_aes_retrieved.decrypt_and_verify(ciphertext_retrieved, tag_retrieved)
+    assert data.decode('utf-8') == document.decode('utf-8')
+
+# TODO: Test with document encryption encrypt the document and see if it all still works
+def test_encrypted_document_upload():
+    key = RSA.generate(2048)
+    private_key = key.export_key()
+    file_out = open("test_encrypted_document_upload_private.pem", "wb")
+    file_out.write(private_key)
+    file_out.close()
+
+    public_key = key.publickey().export_key()
+    file_out = open("test_encrypted_document_upload_receiver.pem", "wb")
+    file_out.write(public_key)
+    file_out.close()
+
+    document = "test_encrypted_document_upload test document".encode("utf-8")
+
+    recipient_key = RSA.import_key(open("test_encrypted_document_upload_receiver.pem").read())
+    session_key = get_random_bytes(16)
+
+    cipher_rsa = PKCS1_OAEP.new(recipient_key)
+    enc_session_key = cipher_rsa.encrypt(session_key)
+
+    cipher_aes = AES.new(session_key, AES.MODE_EAX)
+    ciphertext, tag = cipher_aes.encrypt_and_digest(document)
+
+    encrypted_string = enc_session_key
+    encrypted_string += cipher_aes.nonce
+    encrypted_string += tag
+    encrypted_string += ciphertext
+    print(encrypted_string)
+
+    database_key = str(uuid.uuid4())
+    doc_creation = app.test_client().post('/create_document', json={
+        'database key': database_key,
+        'document': encrypted_string,
+        'encrypt': 'True'
+    })
+
+    assert b'Document successfully created' in doc_creation.data
+
+    json_file = json.loads(doc_creation.data)
+    doc_key = json_file['document key']
+
+    chain = app.test_client().post('/get_latest', json={
+        'database key': database_key,
+        'document key': doc_key
+    })
+
+    assert b'Document successfully retrieved' in chain.data
+
+    json_file2 = json.loads(chain.data)
+    encrypted_document = json_file2['document']['document']
+    print(encrypted_document)
+    formatted_string = encrypted_document
+    print(formatted_string)
+
+    private_key_retrieved = RSA.import_key(open("test_encrypted_document_upload_private.pem").read())
+
+    position = private_key_retrieved.size_in_bytes()
+    enc_session_key_retrieved = formatted_string[:position]
+    nonce_retrieved = formatted_string[position:position+16]
+    position += 16
+    tag_retrieved = formatted_string[position:position+16]
+    position += 16
+    ciphertext_retrieved = formatted_string[position:]
+
+    assert enc_session_key_retrieved == enc_session_key
+    assert nonce_retrieved == cipher_aes.nonce
+    assert tag_retrieved == tag
+    assert ciphertext_retrieved == ciphertext
+
+    cipher_rsa_retrieved = PKCS1_OAEP.new(private_key_retrieved)
+
+    session_key = cipher_rsa_retrieved.decrypt(enc_session_key_retrieved)
+
+    cipher_aes_retrieved = AES.new(session_key, AES.MODE_EAX, nonce_retrieved)
+    data = cipher_aes_retrieved.decrypt_and_verify(ciphertext_retrieved, tag_retrieved)
+    print(data.decode('utf-8'))
+
+    assert document.decode('utf-8') == data.decode('utf-8')
+    assert 'a' == 'b'
+
+
+def test_get_chain():
+    chain = app.test_client().get('/get_chain')
+    print(chain.data)
+    assert 'a' == 'b'
