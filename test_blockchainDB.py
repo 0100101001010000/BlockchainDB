@@ -1,5 +1,9 @@
 import pytest
 import json
+import base64
+
+from werkzeug.datastructures import FileStorage
+
 from BlockchainDB import app
 import uuid
 from Crypto.PublicKey import RSA
@@ -336,6 +340,7 @@ def test_string_encryption():
     data = cipher_aes_retrieved.decrypt_and_verify(ciphertext_retrieved, tag_retrieved)
     assert data.decode('utf-8') == document.decode('utf-8')
 
+
 # TODO: Test with document encryption encrypt the document and see if it all still works
 def test_encrypted_document_upload():
     key = RSA.generate(2048)
@@ -359,17 +364,17 @@ def test_encrypted_document_upload():
 
     cipher_aes = AES.new(session_key, AES.MODE_EAX)
     ciphertext, tag = cipher_aes.encrypt_and_digest(document)
-
     encrypted_string = enc_session_key
     encrypted_string += cipher_aes.nonce
     encrypted_string += tag
     encrypted_string += ciphertext
-    print(encrypted_string)
+
+    b64encoded_string = base64.b64encode(encrypted_string).decode("utf-8")
 
     database_key = str(uuid.uuid4())
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
-        'document': encrypted_string,
+        'document': b64encoded_string,
         'encrypt': 'True'
     })
 
@@ -387,19 +392,17 @@ def test_encrypted_document_upload():
 
     json_file2 = json.loads(chain.data)
     encrypted_document = json_file2['document']['document']
-    print(encrypted_document)
-    formatted_string = encrypted_document
-    print(formatted_string)
+    b64decoded_string = base64.b64decode(encrypted_document)
 
     private_key_retrieved = RSA.import_key(open("test_encrypted_document_upload_private.pem").read())
 
     position = private_key_retrieved.size_in_bytes()
-    enc_session_key_retrieved = formatted_string[:position]
-    nonce_retrieved = formatted_string[position:position+16]
+    enc_session_key_retrieved = b64decoded_string[:position]
+    nonce_retrieved = b64decoded_string[position:position+16]
     position += 16
-    tag_retrieved = formatted_string[position:position+16]
+    tag_retrieved = b64decoded_string[position:position+16]
     position += 16
-    ciphertext_retrieved = formatted_string[position:]
+    ciphertext_retrieved = b64decoded_string[position:]
 
     assert enc_session_key_retrieved == enc_session_key
     assert nonce_retrieved == cipher_aes.nonce
@@ -407,18 +410,9 @@ def test_encrypted_document_upload():
     assert ciphertext_retrieved == ciphertext
 
     cipher_rsa_retrieved = PKCS1_OAEP.new(private_key_retrieved)
-
     session_key = cipher_rsa_retrieved.decrypt(enc_session_key_retrieved)
 
     cipher_aes_retrieved = AES.new(session_key, AES.MODE_EAX, nonce_retrieved)
     data = cipher_aes_retrieved.decrypt_and_verify(ciphertext_retrieved, tag_retrieved)
-    print(data.decode('utf-8'))
 
     assert document.decode('utf-8') == data.decode('utf-8')
-    assert 'a' == 'b'
-
-
-def test_get_chain():
-    chain = app.test_client().get('/get_chain')
-    print(chain.data)
-    assert 'a' == 'b'
