@@ -1,3 +1,7 @@
+import base64
+
+from Crypto.PublicKey import RSA
+from Crypto.Signature import pkcs1_15
 from flask import Flask, jsonify, request
 import datetime
 import hashlib
@@ -5,7 +9,7 @@ import json
 from urllib.parse import urlparse
 import requests
 import uuid
-
+from Crypto.Hash import SHA384
 
 ########################################################################################################################
 # TODO:
@@ -53,7 +57,6 @@ class Blockchain:
             'previous_hash': previous_hash,
             'database key': self.database_key,
             'document': self.document
-            # add database_key and document_key here?
         }
         # empty list once put into the block, must be a more efficient way to do this
         self.database_key = 0
@@ -124,39 +127,18 @@ class Blockchain:
 
         return False
 
-    # TODO: Once you understand encryption this needs to be done
-    def encrypt_document(self, document):
-        return document
-        # return hashlib.sha256(document).encode().hexidigest()
-
-    def decrypt_document(self, document):
-        return document
-        # return hashlib.sha256(document).decode()
-
     # Document Creation #
     # TODO: Handle existing key better, just try it again, in a while loop or something
-    # TODO: Pass in public key for encryption, if below it true
-    # TODO: Encrypt document and make it optional, default it to encrypt and if no key is provided then fail
-    def create_document(self, database_key, document, encrypt):
+    def create_document(self, database_key, document, signature):
         document_key = str(uuid.uuid4())
-        # previous_document = self.get_document(database_key, document_key, 'latest')
-        # if previous_document != 901:
-        #    return 200, 'Error - Document key already exists!'
         self.database_key = database_key
-        if encrypt:
-            self.document = {
-                'document key': document_key,
-                'version': 0,
-                'is alive': True,
-                'document': self.encrypt_document(document)
-            }
-        else:
-            self.document = {
-                'document key': document_key,
-                'version': 0,
-                'is alive': True,
-                'document': document
-            }
+        self.document = {
+            'document key': document_key,
+            'version': 0,
+            'is alive': True,
+            'document': document,
+            'signature': signature
+        }
         previous_block = self.get_previous_block()
         previous_proof = previous_block['proof']
         proof = self.proof_of_work(previous_proof)
@@ -165,10 +147,10 @@ class Blockchain:
 
         return {'return code': 100, 'return info': document_key}
 
-    def create_multiple_documents(self, database_key, documents, encrypt):
+    def create_multiple_documents(self, database_key, documents, signature):
         result = {}
         for document in documents:
-            created_document = self.create_document(database_key, documents[document], encrypt)
+            created_document = self.create_document(database_key, documents[document], signature)
 
             result.update(
                 {
@@ -214,7 +196,7 @@ class Blockchain:
         return self.get_document(database_key, 0, 'all latest')
 
     # Document Updates #
-    def update_document(self, database_key, document_key, document, encrypt):
+    def update_document(self, database_key, document_key, document, signature, public_key=b''):
         previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document['return code'] != 300:
             return previous_document
@@ -222,19 +204,35 @@ class Blockchain:
         self.database_key = database_key
 
         if previous_document['return info']['document']:
-            if encrypt:
+            if previous_document['return info']['signature'] == 'Open':
                 self.document = {
                         'document key': document_key,
                         'version': previous_document['return info']['version'] + 1,
                         'is alive': True,
-                        'document': self.encrypt_document(document)
+                        'document': document,
+                        'signature': signature
                     }
             else:
+                if public_key == '':
+                    return {{'return code': 603, 'return message': 'Public key cannot be empty'}}
+                retrieved_signature = base64.b64decode(previous_document['return info']['signature'])
+                verification_key = RSA.import_key(public_key)
+                verifier = pkcs1_15.new(verification_key)
+                hash_verify = SHA384.new()
+                hash_verify.update(previous_document['return info']['document'].encode('utf-8'))
+                try:
+                    verifier.verify(hash_verify, retrieved_signature)
+                except ValueError:
+                    return {'return code': 601, 'return message': 'Cannot verify document'}
+                except:
+                    return {'return code': 602, 'return message': 'Unhandled exception'}
+
                 self.document = {
                         'document key': document_key,
                         'version': previous_document['return info']['version'] + 1,
                         'is alive': True,
-                        'document': document
+                        'document': document,
+                        'signature': signature
                     }
 
             previous_block = self.get_previous_block()
@@ -307,21 +305,6 @@ class Blockchain:
             return {'return code': 4000, 'return info': f'Issues restoring the document: {return_code}'}
         return {'return code': 3000, 'return info': 'Document successfully restored'}
 
-    # Just encrypt/decrypt text document #
-    def change_document_encryption(self, database_key, document_key, encryption):
-        document = self.get_latest(database_key, document_key)
-
-        if encryption == 'encrypt':
-            return_code = self.update_document(database_key, document_key, document, True)
-        elif encryption == 'decrypt':
-            return_code = self.update_document(database_key, document_key, self.decrypt_document(document), False)
-        else:
-            return {'return code': 6000, 'return info': 'Incorrect encryption type'}
-
-        if return_code['return code'] != 500:
-            return {'return code': 6001, 'return info': f'Issues changing the document encryption {return_code}'}
-        return {'return code': 5000, 'return info': 'Encryption successfully changed'}
-
     def get_document(self, database_key, document_key, query, version=0):
         # TODO: Only store the db instead of the chain? Would make it more efficient to run multiple queries against
         #  same db
@@ -378,8 +361,6 @@ class Blockchain:
 ########################################################################################################################
 ########################################################################################################################
 ########################################################################################################################
-
-# TODO: Redo all of this
 
 # Flask
 app = Flask(__name__)
@@ -455,15 +436,17 @@ def create_document():
     if json_file is None:
         return f'Error - {json_file}'
 
-    transaction_keys = ['database key', 'document']
+    transaction_keys = ['database key', 'document', 'signature']
 
     if not all(key in json_file for key in transaction_keys):
         return jsonify({'message': 'Incorrect format provided'})
 
     if json_file['database key'] == '':
         return jsonify({'message': 'Please provide a db key'})
+    if json_file['signature'] == '':
+        return jsonify({'message': 'Please provide a signature'})
 
-    document_key = blockchain.create_document(json_file['database key'], json_file['document'], json_file['encrypt'])
+    document_key = blockchain.create_document(json_file['database key'], json_file['document'], json_file['signature'])
     if document_key['return code'] == 100:
         response = {
             'message': 'Document successfully created',
@@ -480,16 +463,18 @@ def create_document():
 @app.route('/create_documents', methods=['POST'])
 def create_documents():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'documents', 'encrypt']
+    transaction_keys = ['database key', 'documents', 'signature']
 
     if not all(key in json_file for key in transaction_keys):
         return jsonify({'message': 'Incorrect format provided'})
 
     if json_file['database key'] == '':
         return jsonify({'message': 'Please provide a db key'})
+    if json_file['signature'] == '':
+        return jsonify({'message': 'Please provide a signature'})
 
     document_keys = blockchain.create_multiple_documents(json_file['database key'], json_file['documents'],
-                                                         json_file['encrypt'])
+                                                         json_file['signature'])
 
     response = {
         'message': 'Documents successfully created',
@@ -611,7 +596,7 @@ def get_all_db_documents():
 @app.route('/update_document', methods=['POST'])
 def update_document():
     json_file = request.get_json()
-    transaction_keys = ['database key', 'document key', 'document', 'encrypt']
+    transaction_keys = ['database key', 'document key', 'document', 'signature']
 
     if not all(key in json_file for key in transaction_keys):
         return jsonify({'message': 'Incorrect format provided'})
@@ -622,9 +607,20 @@ def update_document():
         return jsonify({'message': 'Please provide a document key'})
     elif json_file['document'] is None:
         return jsonify({'message': 'Please provide a document'})
+    if json_file['signature'] == '':
+        return jsonify({'message': 'Please provide a signature'})
 
-    document = blockchain.update_document(json_file['database key'], json_file['document key'], json_file['document'],
-                                          json_file['encrypt'])
+    if 'public key' not in json_file:
+        document = blockchain.update_document(json_file['database key'],
+                                              json_file['document key'],
+                                              json_file['document'],
+                                              json_file['signature'])
+    else:
+        document = blockchain.update_document(json_file['database key'],
+                                              json_file['document key'],
+                                              json_file['document'],
+                                              json_file['signature'],
+                                              json_file['public key'])
 
     if document == 500:
         response = {

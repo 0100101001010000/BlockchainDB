@@ -1,14 +1,13 @@
 import pytest
 import json
 import base64
-
-from werkzeug.datastructures import FileStorage
-
 from BlockchainDB import app
 import uuid
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA384
 
 # TODO: Test errors!
 
@@ -23,9 +22,8 @@ def test_create_document():
     chain = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_create_document test document',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
-
     assert b'Document successfully created' in chain.data
 
 
@@ -40,13 +38,11 @@ def test_create_multiple_documents():
             'document4': 'test_create_multiple_documents test document 4',
             'document5': 'test_create_multiple_documents test document 5',
         },
-        'encrypt': 'True'
+        'signature': 'Open'
     })
-
     assert b'Documents successfully created' in chain.data
 
 
-# TODO: check whether the reverse loop works with an update to the document
 def test_get_latest():
     database_key = str(uuid.uuid4())
     doc_creation = app.test_client().post('/create_documents', json={
@@ -58,7 +54,7 @@ def test_get_latest():
             'document4': 'test_get_latest test document 4',
             'document5': 'test_get_latest test document 5',
         },
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Documents successfully created' in doc_creation.data
@@ -85,7 +81,7 @@ def test_get_version():
             'document4': 'test_get_version test document 4',
             'document5': 'test_get_version test document 5',
         },
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Documents successfully created' in doc_creation.data
@@ -105,7 +101,7 @@ def test_get_version():
         'database key': database_key,
         'document key': doc1_key,
         'document': 'test_update_document test document update',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully updated' in doc_update.data
@@ -130,7 +126,7 @@ def test_get_all_versions():
             'document4': 'test_get_versions test document 4',
             'document5': 'test_get_versions test document 5',
         },
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Documents successfully created' in doc_creation.data
@@ -149,7 +145,7 @@ def test_get_all_versions():
         'database key': database_key,
         'document key': doc1_key,
         'document': 'test_update_document test document update',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully updated' in doc_update.data
@@ -173,7 +169,7 @@ def test_get_all_db_documents():
             'document4': 'test_get_all_db_documents test document 4',
             'document5': 'test_get_all_db_documents test document 5',
         },
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Documents successfully created' in doc_creation.data
@@ -190,7 +186,7 @@ def test_update_document():
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_update_document test document',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully created' in doc_creation.data
@@ -202,7 +198,7 @@ def test_update_document():
         'database key': database_key,
         'document key': doc_key,
         'document': 'test_update_document test document update',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully updated' in chain.data
@@ -213,7 +209,7 @@ def test_delete_document():
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_delete_document test document',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully created' in doc_creation.data
@@ -224,7 +220,7 @@ def test_delete_document():
     chain = app.test_client().post('/delete_document', json={
         'database key': database_key,
         'document key': doc_key,
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully deleted' in chain.data
@@ -235,7 +231,7 @@ def test_resurrect_document():
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_resurrect_document test document',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully created' in doc_creation.data
@@ -246,7 +242,7 @@ def test_resurrect_document():
     doc_deletion = app.test_client().post('/delete_document', json={
         'database key': database_key,
         'document key': doc_key,
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully deleted' in doc_deletion.data
@@ -254,8 +250,10 @@ def test_resurrect_document():
     chain = app.test_client().post('/resurrect_document', json={
         'database key': database_key,
         'document key': doc_key,
-        'encrypt': 'True'
+        'signature': 'Open'
     })
+
+    assert b'Document successfully resurrected' in chain.data
 
 
 def test_restore_document():
@@ -263,7 +261,7 @@ def test_restore_document():
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': 'test_restore_document test document',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully created' in doc_creation.data
@@ -275,7 +273,7 @@ def test_restore_document():
         'database key': database_key,
         'document key': doc_key,
         'document': 'test_update_document test document update',
-        'encrypt': 'True'
+        'signature': 'Open'
     })
 
     assert b'Document successfully updated' in doc_update.data
@@ -289,6 +287,10 @@ def test_restore_document():
     assert b'Document successfully restored' in chain.data
 
 
+# TODO: Error Testing!!!
+# Error testing
+
+# Encryption Tests
 def test_string_encryption():
     key = RSA.generate(2048)
     private_key = key.export_key()
@@ -341,7 +343,64 @@ def test_string_encryption():
     assert data.decode('utf-8') == document.decode('utf-8')
 
 
-# TODO: Test with document encryption encrypt the document and see if it all still works
+def test_digital_signature():
+
+    key = RSA.generate(2048)
+    private_key = key.export_key()
+    file_out = open("test_digital_signature_private.pem", "wb")
+    file_out.write(private_key)
+    file_out.close()
+
+    public_key = key.publickey().export_key()
+    file_out = open("test_digital_signature_receiver.pem", "wb")
+    file_out.write(public_key)
+    file_out.close()
+
+    message = b'test_digital_signature'
+
+    # sign
+    signature_key = RSA.import_key(open("test_digital_signature_private.pem").read())
+    signer = pkcs1_15.new(signature_key)
+    hash_sign = SHA384.new()
+    hash_sign.update(message)
+    signature = signer.sign(hash_sign)
+
+    # verify
+    verification_key = RSA.import_key(open("test_digital_signature_receiver.pem").read())
+    verifier = pkcs1_15.new(verification_key)
+    hash_verify = SHA384.new()
+    hash_verify.update(message)
+    verifier.verify(hash_verify, signature)
+
+    # test message tampering
+    with pytest.raises(ValueError):
+        tampered_message = message + b' this message has been tampered'
+        verification_key = RSA.import_key(open("test_digital_signature_receiver.pem").read())
+        verifier = pkcs1_15.new(verification_key)
+        hash_verify = SHA384.new()
+        hash_verify.update(tampered_message)
+        verifier.verify(hash_verify, signature)
+
+    # test incorrect key
+    key = RSA.generate(2048)
+    private_key = key.export_key()
+    file_out = open("test_digital_signature_private_wrong.pem", "wb")
+    file_out.write(private_key)
+    file_out.close()
+
+    public_key = key.publickey().export_key()
+    file_out = open("test_digital_signature_receiver_wrong.pem", "wb")
+    file_out.write(public_key)
+    file_out.close()
+
+    with pytest.raises(ValueError):
+        verification_key = RSA.import_key(open("test_digital_signature_receiver_wrong.pem").read())
+        verifier = pkcs1_15.new(verification_key)
+        hash_verify = SHA384.new()
+        hash_verify.update(message)
+        verifier.verify(hash_verify, signature)
+
+
 def test_encrypted_document_upload():
     key = RSA.generate(2048)
     private_key = key.export_key()
@@ -375,7 +434,7 @@ def test_encrypted_document_upload():
     doc_creation = app.test_client().post('/create_document', json={
         'database key': database_key,
         'document': b64encoded_string,
-        'encrypt': 'True'
+        'signature': 'open'
     })
 
     assert b'Document successfully created' in doc_creation.data
@@ -413,6 +472,67 @@ def test_encrypted_document_upload():
     session_key = cipher_rsa_retrieved.decrypt(enc_session_key_retrieved)
 
     cipher_aes_retrieved = AES.new(session_key, AES.MODE_EAX, nonce_retrieved)
-    data = cipher_aes_retrieved.decrypt_and_verify(ciphertext_retrieved, tag_retrieved)
+    decrypted_document = cipher_aes_retrieved.decrypt_and_verify(ciphertext_retrieved, tag_retrieved)
 
-    assert document.decode('utf-8') == data.decode('utf-8')
+    assert document.decode('utf-8') == decrypted_document.decode('utf-8')
+
+
+def test_document_signature():
+    key = RSA.generate(2048)
+    private_key = key.export_key()
+    file_out = open("test_document_signature_private.pem", "wb")
+    file_out.write(private_key)
+    file_out.close()
+
+    public_key = key.publickey().export_key()
+    file_out = open("test_document_signature_receiver.pem", "wb")
+    file_out.write(public_key)
+    file_out.close()
+
+    document = b'test_create_document test document'
+
+    # sign
+    signature_key = RSA.import_key(open("test_document_signature_private.pem").read())
+    signer = pkcs1_15.new(signature_key)
+    hash_sign = SHA384.new()
+    hash_sign.update(document)
+    signature = signer.sign(hash_sign)
+
+    database_key = str(uuid.uuid4())
+    doc_creation = app.test_client().post('/create_document', json={
+        'database key': database_key,
+        'document': document,
+        'signature': base64.b64encode(signature)
+    })
+
+    assert b'Document successfully created' in doc_creation.data
+
+    json_file = json.loads(doc_creation.data)
+    doc_key = json_file['document key']
+
+    chain = app.test_client().post('/get_latest', json={
+        'database key': database_key,
+        'document key': doc_key
+    })
+
+    assert b'Document successfully retrieved' in chain.data
+
+    json2_file = json.loads(chain.data)
+    retrieved_signature = base64.b64decode(json2_file['document']['signature'])
+
+    verification_key_string = open("test_document_signature_receiver.pem").read()
+    verification_key = RSA.import_key(verification_key_string)
+    verifier = pkcs1_15.new(verification_key)
+    hash_verify = SHA384.new()
+    hash_verify.update(json2_file['document']['document'].encode('utf-8'))
+    verifier.verify(hash_verify, retrieved_signature)
+
+    updated_chain = app.test_client().post('/update_document', json={
+        'database key': database_key,
+        'document key': doc_key,
+        'document': 'test_update_document test document update',
+        'signature': base64.b64encode(signature),
+        'public key': verification_key_string
+    })
+
+    assert b'Document successfully updated' in updated_chain.data
