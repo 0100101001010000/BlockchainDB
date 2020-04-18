@@ -106,29 +106,49 @@ class Blockchain:
         # it's the port see urllib docs
         self.nodes.add(parsed_url.netloc)
 
-    # TODO: find a clean way to integrate this into the code, it will probably need to be separate
-    def replace_chain(self):
+    def replace_chain(self, chain):
+        if self.is_chain_valid(chain) and len(self.chain) < len(chain):
+            self.chain = chain
+            return True
+        else:
+            # TODO: Block node trying the dodgy update? Warn someone? Log it?
+            return False
+
+    def update_network(self, index, timestamp, database_key, document_key, version):
         network = self.nodes
-        longest_chain = None
-        max_length = len(self.chain)
+        current_chain_length = len(self.chain)
 
         for node in network:
+            # TODO: replace this with prod node addresses
             response = requests.get(f'http://127.0.0.1:{node}/get_chain')
             if response.status_code == 200:
                 length = response.json()['length']
                 chain = response.json()['chain']
-                if length > max_length and self.is_chain_valid(chain):
-                    longest_chain = chain
-                    max_length = length
+                is_chain_valid = self.is_chain_valid(chain)
+                is_doc_available = self.is_doc_available(chain, index, timestamp, database_key, document_key, version)
 
-        if longest_chain:
-            self.chain = longest_chain
-            return True
+                if length > current_chain_length and is_chain_valid:
+                    # longest chain wins, replace this chain, then stop
+                    self.chain = chain
+                    return
+                elif length == current_chain_length and is_chain_valid and is_doc_available:
+                    continue
+                elif length < current_chain_length and is_chain_valid and not is_doc_available:
+                    # TODO: replace other chain, seems absurd to send the entire chain? Merkel trees to only replace
+                    # the section that needs to be replaced
+                    # TODO: replace this with prod node addresses
+                    requests.post(f'http://127.0.0.1:{node}/replace_chain', json={'chain': self.chain})
+                elif length == current_chain_length and is_chain_valid and not is_doc_available:
+                    # do nothing, wait until next update, longest chain will win eventually,
+                    continue
 
+    def is_doc_available(self, chain, index, timestamp, database_key, document_key, version):
+        for block in sorted(chain, key=lambda x: x['index'], reverse=True):
+            if block['database key'] == database_key and block['document']['document key'] == document_key:
+                return True
         return False
 
     # Document Creation #
-    # TODO: Handle existing key better, just try it again, in a while loop or something
     def create_document(self, database_key, document, signature):
         document_key = str(uuid.uuid4())
         self.database_key = database_key
@@ -418,14 +438,21 @@ def connect_node():
     return jsonify(response), 201
 
 
-@app.route('/replace_chain', methods=['GET'])
+@app.route('/replace_chain', methods=['POST'])
 def replace_chain():
-    replace_chain_bool = blockchain.replace_chain()
+    json_file = request.get_json()
+    if json_file is None:
+        return f'Error - {json_file}'
 
-    if replace_chain_bool:
-        return jsonify({'message': 'Chain has been updated', 'new_chain': blockchain.chain}), 200
+    if not json_file['chain']:
+        return jsonify({'message': 'Incorrect format provided'})
+
+    chain_replaced = blockchain.replace_chain(json_file['chain'])
+
+    if chain_replaced:
+        return jsonify({'return code': 0000, 'return message': 'Chain successfully replaced'})
     else:
-        return jsonify({'message': 'Chain is up to date', 'chain': blockchain.chain}), 200
+        return jsonify({'return code': 0000, 'return message': 'Issues replacing chain'})
 
 
 ## Queries ##
@@ -452,6 +479,12 @@ def create_document():
             'message': 'Document successfully created',
             'document key': document_key["return info"]
         }
+        # TODO: on create do an update chain to send the update notification to all other nodes
+        # Get nodes
+        # Repeat the same command as was done on the initinial call
+        # Have it in one call and multithread it so that this just ends after
+        blockchain.update_network()
+
         return jsonify(response)
     else:
         response = {
@@ -709,35 +742,6 @@ def restore_document():
         return jsonify(response)
     else:
         response = {'message': f'Issue restoring the document: {document}'}
-        return jsonify(response)
-
-
-# change_document_encryption(self, database_key, document_key, encryption)
-@app.route('/change_encryption', methods=['POST'])
-def change_encryption():
-    json_file = request.get_json()
-    transaction_keys = ['database key', 'document key', 'encrypt']
-
-    if not all(key in json_file for key in transaction_keys):
-        return jsonify({'message': 'Incorrect format provided'})
-
-    if json_file['database key'] == '':
-        return jsonify({'message': 'Please provide a db key'})
-    elif json_file['document key'] == '':
-        return jsonify({'message': 'Please provide a document key'})
-    elif json_file['encryption'] is None:
-        return jsonify({'message': 'Please provide a version'})
-
-    document = blockchain.change_document_encryption(json_file['database key'], json_file['document key'],
-                                                     json_file['encryption'])
-
-    if document == 5000:
-        response = {
-            'message': f'Encryption successfully changed'
-        }
-        return jsonify(response)
-    else:
-        response = {'message': f'Issue changing the encryption: {document}'}
         return jsonify(response)
 
 

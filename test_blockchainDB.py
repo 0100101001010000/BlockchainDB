@@ -16,6 +16,8 @@ def test_get_chain():
     chain = app.test_client().get('/get_chain')
     assert b'{"chain":[{"database key":0,"document":{},"index":1,"previous_hash":"0","proof":1' in chain.data
 
+# TODO: Test replace chain!
+
 
 def test_create_document():
     database_key = str(uuid.uuid4())
