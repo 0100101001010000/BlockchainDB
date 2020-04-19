@@ -49,6 +49,8 @@ class BlockchainDB:
         self.create_block(proof=1, previous_hash='0')
         self.nodes = set()
         self.update_chain()
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+        logging.info('Starting chain...')
 
     # TODO: Create can be done better, for chains that don't need to be put on a queue no need for this...
     def create_block(self, proof, previous_hash):
@@ -64,11 +66,8 @@ class BlockchainDB:
         self.database_key = 0
         self.document = []
         self.chain.append(block)
+        logging.debug(f'New block created: \n {block}')
         return block
-
-    # No need for previous block per, chang to be previous hash?
-    def get_previous_block(self):
-        return self.chain[-1]
 
     # This is going to need to be adapted to the new chain
     def proof_of_work(self, previous_proof):
@@ -107,13 +106,16 @@ class BlockchainDB:
         parsed_url = urlparse(address)
         # it's the port see urllib docs
         self.nodes.add(parsed_url.netloc)
+        logging.debug(f'New node added: {parsed_url.netloc}')
 
     def replace_chain(self, chain):
         if self.is_chain_valid(chain) and len(self.chain) < len(chain):
             self.chain = chain
+            logging.info('This chain has been replaced')
             return True
         else:
             # TODO: Block node trying the dodgy update? Warn someone? Log it?
+            logging.warning('There has been an attempt to update this chain with an invalid chain')
             return False
 
     def update_network(self, database_key, document_key):
@@ -138,6 +140,7 @@ class BlockchainDB:
 
                 if length > current_chain_length and is_chain_valid:
                     # longest chain wins, replace this chain, then stop
+                    logging.info('This chain is being replaced, longest chain wins')
                     self.chain = chain
                     return
                 elif length == current_chain_length and is_chain_valid and does_last_block_match:
@@ -146,12 +149,15 @@ class BlockchainDB:
                     # TODO: replace other chain, seems absurd to send the entire chain? Merkel trees to only replace
                     # the section that needs to be replaced
                     # TODO: replace this with prod node addresses
+                    logging.info(f'Updating chain at {node}')
                     requests.post(f'http://127.0.0.1:{node}/replace_chain', json={'chain': self.chain})
                 elif length == current_chain_length and is_chain_valid and not does_last_block_match:
                     # do nothing, wait until next update, longest chain will win eventually,
+                    logging.info(f'This chain and chain at {node}, don\'t match, next update wins')
                     continue
 
     def update_chain(self):
+        logging.info('Checking for more up-to-date chains')
         network = self.nodes
         longest_chain = None
         longest_chain_length = len(self.chain)
@@ -164,11 +170,13 @@ class BlockchainDB:
                 chain = response.json()['chain']
 
                 if length > longest_chain_length and self.is_chain_valid(chain):
+                    logging.info(f'Longer chain found at {node}')
                     longest_chain = chain
                     longest_chain_length = length
 
         if longest_chain:
             self.chain = longest_chain
+            logging.info('This chain has been replaced')
 
     # Document Creation #
     def create_document(self, database_key, document, signature):
@@ -181,11 +189,12 @@ class BlockchainDB:
             'document': document,
             'signature': signature
         }
-        previous_block = self.get_previous_block()
+        previous_block = self.chain[-1]
         previous_proof = previous_block['proof']
         proof = self.proof_of_work(previous_proof)
         previous_hash = self.hash(previous_block)
         self.create_block(proof, previous_hash)
+        logging.debug('New document created')
 
         return {'return code': 100, 'return info': document_key}
 
@@ -277,11 +286,12 @@ class BlockchainDB:
                         'signature': signature
                     }
 
-            previous_block = self.get_previous_block()
+            previous_block = self.chain[-1]
             previous_proof = previous_block['proof']
             proof = self.proof_of_work(previous_proof)
             previous_hash = self.hash(previous_block)
             self.create_block(proof, previous_hash)
+            logging.debug('Document updated')
 
             return {'return code': 500, 'return message': 'Document successfully updated'}
         return {'return code': 600, 'return message': 'Issue updating the document'}
@@ -304,7 +314,7 @@ class BlockchainDB:
                 'document': previous_document['return info']['document']
             }
 
-        previous_block = self.get_previous_block()
+        previous_block = self.chain[-1]
         previous_proof = previous_block['proof']
         proof = self.proof_of_work(previous_proof)
         previous_hash = self.hash(previous_block)
@@ -330,11 +340,12 @@ class BlockchainDB:
             'document': previous_document['return info']['document']
         }
 
-        previous_block = self.get_previous_block()
+        previous_block = self.chain[-1]
         previous_proof = previous_block['proof']
         proof = self.proof_of_work(previous_proof)
         previous_hash = self.hash(previous_block)
         self.create_block(proof, previous_hash)
+        logging.debug('Document resurrected')
 
         return {'return code': 1000, 'return message': 'Document successfully resurrected'}
 
@@ -345,6 +356,8 @@ class BlockchainDB:
 
         if return_code['return code'] != 500:
             return {'return code': 4000, 'return info': f'Issues restoring the document: {return_code}'}
+
+        logging.info('Document restored')
         return {'return code': 3000, 'return info': 'Document successfully restored'}
 
     def get_document(self, database_key, document_key, query, version=0):
@@ -412,11 +425,13 @@ node_address = str(uuid.uuid4()).replace('-', '')
 
 blockchainDB = BlockchainDB()
 
+# TODO: Add logging below? See how it turns out when it gets run on a machine
+
 
 # TODO: No longer needed?
 @app.route('/mine_block', methods=['GET'])
 def mine_block():
-    previous_block = blockchainDB.get_previous_block()
+    previous_block = blockchainDB.chain[-1]
     previous_proof = previous_block['proof']
     proof = blockchainDB.proof_of_work(previous_proof)
     previous_hash = blockchainDB.hash(previous_block)
