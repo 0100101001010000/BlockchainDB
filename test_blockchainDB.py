@@ -288,9 +288,6 @@ def test_restore_document():
     assert b'Document successfully restored' in chain.data
 
 
-# TODO: Error Testing!!!
-# Error testing
-
 # Encryption Tests
 def test_string_encryption():
     key = RSA.generate(2048)
