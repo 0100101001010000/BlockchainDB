@@ -1,5 +1,4 @@
 import base64
-
 from Crypto.PublicKey import RSA
 from Crypto.Signature import pkcs1_15
 from flask import Flask, jsonify, request
@@ -10,6 +9,8 @@ from urllib.parse import urlparse
 import requests
 import uuid
 from Crypto.Hash import SHA384
+import threading
+import logging
 
 ########################################################################################################################
 # TODO:
@@ -39,7 +40,7 @@ from Crypto.Hash import SHA384
 ########################################################################################################################
 
 
-class Blockchain:
+class BlockchainDB:
 
     def __init__(self):
         self.chain = []
@@ -47,6 +48,7 @@ class Blockchain:
         self.document = {}
         self.create_block(proof=1, previous_hash='0')
         self.nodes = set()
+        self.update_chain()
 
     # TODO: Create can be done better, for chains that don't need to be put on a queue no need for this...
     def create_block(self, proof, previous_hash):
@@ -114,7 +116,7 @@ class Blockchain:
             # TODO: Block node trying the dodgy update? Warn someone? Log it?
             return False
 
-    def update_network(self, index, timestamp, database_key, document_key, version):
+    def update_network(self, database_key, document_key):
         network = self.nodes
         current_chain_length = len(self.chain)
 
@@ -122,31 +124,51 @@ class Blockchain:
             # TODO: replace this with prod node addresses
             response = requests.get(f'http://127.0.0.1:{node}/get_chain')
             if response.status_code == 200:
+                # As this is in a different thread, make sure that no one has updated chain while looping through nodes
+                if database_key != self.chain[-1]['database key'] and document_key != self.chain[-1]['database key']['document key']:
+                    return
+
                 length = response.json()['length']
                 chain = response.json()['chain']
                 is_chain_valid = self.is_chain_valid(chain)
-                is_doc_available = self.is_doc_available(chain, index, timestamp, database_key, document_key, version)
+                does_last_block_match = False
+
+                if chain[-1] == self.chain[-1]:
+                    does_last_block_match = True
 
                 if length > current_chain_length and is_chain_valid:
                     # longest chain wins, replace this chain, then stop
                     self.chain = chain
                     return
-                elif length == current_chain_length and is_chain_valid and is_doc_available:
+                elif length == current_chain_length and is_chain_valid and does_last_block_match:
                     continue
-                elif length < current_chain_length and is_chain_valid and not is_doc_available:
+                elif length < current_chain_length and is_chain_valid and not does_last_block_match:
                     # TODO: replace other chain, seems absurd to send the entire chain? Merkel trees to only replace
                     # the section that needs to be replaced
                     # TODO: replace this with prod node addresses
                     requests.post(f'http://127.0.0.1:{node}/replace_chain', json={'chain': self.chain})
-                elif length == current_chain_length and is_chain_valid and not is_doc_available:
+                elif length == current_chain_length and is_chain_valid and not does_last_block_match:
                     # do nothing, wait until next update, longest chain will win eventually,
                     continue
 
-    def is_doc_available(self, chain, index, timestamp, database_key, document_key, version):
-        for block in sorted(chain, key=lambda x: x['index'], reverse=True):
-            if block['database key'] == database_key and block['document']['document key'] == document_key:
-                return True
-        return False
+    def update_chain(self):
+        network = self.nodes
+        longest_chain = None
+        longest_chain_length = len(self.chain)
+
+        for node in network:
+            # TODO: replace this with prod node addresses
+            response = requests.get(f'http://127.0.0.1:{node}/get_chain')
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+                if length > longest_chain_length and self.is_chain_valid(chain):
+                    longest_chain = chain
+                    longest_chain_length = length
+
+        if longest_chain:
+            self.chain = longest_chain
 
     # Document Creation #
     def create_document(self, database_key, document, signature):
@@ -388,18 +410,18 @@ app = Flask(__name__)
 # create an address for the node on port 5000
 node_address = str(uuid.uuid4()).replace('-', '')
 
-blockchain = Blockchain()
+blockchainDB = BlockchainDB()
 
 
 # TODO: No longer needed?
 @app.route('/mine_block', methods=['GET'])
 def mine_block():
-    previous_block = blockchain.get_previous_block()
+    previous_block = blockchainDB.get_previous_block()
     previous_proof = previous_block['proof']
-    proof = blockchain.proof_of_work(previous_proof)
-    previous_hash = blockchain.hash(previous_block)
-    block = blockchain.create_block(proof, previous_hash)
-    blockchain.create_document(node_address, 'J', 1)
+    proof = blockchainDB.proof_of_work(previous_proof)
+    previous_hash = blockchainDB.hash(previous_block)
+    block = blockchainDB.create_block(proof, previous_hash)
+    blockchainDB.create_document(node_address, 'J', 1)
     response = {
         'message': 'Congratulations, you just mined a block',
         'index': block['index'],
@@ -415,8 +437,8 @@ def mine_block():
 @app.route('/get_chain', methods=['GET'])
 def get_chain():
     response = {
-        'chain': blockchain.chain,
-        'length': len(blockchain.chain)
+        'chain': blockchainDB.chain,
+        'length': len(blockchainDB.chain)
     }
 
     return jsonify(response), 200
@@ -431,9 +453,9 @@ def connect_node():
         return 'No node', 400
 
     for node in nodes:
-        blockchain.add_node(node)
+        blockchainDB.add_node(node)
 
-    response = {'message': 'Nodes connected', 'node_list': list(blockchain.nodes)}
+    response = {'message': 'Nodes connected', 'node_list': list(blockchainDB.nodes)}
 
     return jsonify(response), 201
 
@@ -447,7 +469,7 @@ def replace_chain():
     if not json_file['chain']:
         return jsonify({'message': 'Incorrect format provided'})
 
-    chain_replaced = blockchain.replace_chain(json_file['chain'])
+    chain_replaced = blockchainDB.replace_chain(json_file['chain'])
 
     if chain_replaced:
         return jsonify({'return code': 0000, 'return message': 'Chain successfully replaced'})
@@ -473,17 +495,16 @@ def create_document():
     if json_file['signature'] == '':
         return jsonify({'message': 'Please provide a signature'})
 
-    document_key = blockchain.create_document(json_file['database key'], json_file['document'], json_file['signature'])
+    document_key = blockchainDB.create_document(json_file['database key'], json_file['document'], json_file['signature'])
     if document_key['return code'] == 100:
         response = {
             'message': 'Document successfully created',
             'document key': document_key["return info"]
         }
         # TODO: on create do an update chain to send the update notification to all other nodes
-        # Get nodes
-        # Repeat the same command as was done on the initinial call
-        # Have it in one call and multithread it so that this just ends after
-        blockchain.update_network()
+        # send down doc key and db key figure out what else to send
+        update_thread = threading.Thread(target=blockchainDB.update_network, args=(json_file['database key'], document_key["return info"]))
+        update_thread.start()
 
         return jsonify(response)
     else:
@@ -506,8 +527,8 @@ def create_documents():
     if json_file['signature'] == '':
         return jsonify({'message': 'Please provide a signature'})
 
-    document_keys = blockchain.create_multiple_documents(json_file['database key'], json_file['documents'],
-                                                         json_file['signature'])
+    document_keys = blockchainDB.create_multiple_documents(json_file['database key'], json_file['documents'],
+                                                           json_file['signature'])
 
     response = {
         'message': 'Documents successfully created',
@@ -530,7 +551,7 @@ def get_latest():
     elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
 
-    document = blockchain.get_latest(json_file['database key'], json_file['document key'])
+    document = blockchainDB.get_latest(json_file['database key'], json_file['document key'])
 
     if document['return code'] == 300:
         response = {
@@ -559,8 +580,8 @@ def get_version():
     elif json_file['version'] is None:
         return jsonify({'message': 'Please provide a version'})
 
-    document = blockchain.get_specific_document_version(json_file['database key'], json_file['document key'],
-                                                        json_file['version'])
+    document = blockchainDB.get_specific_document_version(json_file['database key'], json_file['document key'],
+                                                          json_file['version'])
 
     if document['return code'] == 300:
         response = {
@@ -587,7 +608,7 @@ def get_all_versions():
     elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
 
-    document = blockchain.get_all_document_versions(json_file['database key'], json_file['document key'])
+    document = blockchainDB.get_all_document_versions(json_file['database key'], json_file['document key'])
 
     if document['return code'] == 301:
         response = {
@@ -612,7 +633,7 @@ def get_all_db_documents():
     if json_file['database key'] == '':
         return jsonify({'message': 'Please provide a db key'})
 
-    document = blockchain.get_all_documents(json_file['database key'])
+    document = blockchainDB.get_all_documents(json_file['database key'])
 
     if document['return code'] == 301:
         response = {
@@ -644,16 +665,16 @@ def update_document():
         return jsonify({'message': 'Please provide a signature'})
 
     if 'public key' not in json_file:
-        document = blockchain.update_document(json_file['database key'],
-                                              json_file['document key'],
-                                              json_file['document'],
-                                              json_file['signature'])
+        document = blockchainDB.update_document(json_file['database key'],
+                                                json_file['document key'],
+                                                json_file['document'],
+                                                json_file['signature'])
     else:
-        document = blockchain.update_document(json_file['database key'],
-                                              json_file['document key'],
-                                              json_file['document'],
-                                              json_file['signature'],
-                                              json_file['public key'])
+        document = blockchainDB.update_document(json_file['database key'],
+                                                json_file['document key'],
+                                                json_file['document'],
+                                                json_file['signature'],
+                                                json_file['public key'])
 
     if document == 500:
         response = {
@@ -679,7 +700,7 @@ def delete_document():
     elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
 
-    document = blockchain.delete_document(json_file['database key'], json_file['document key'])
+    document = blockchainDB.delete_document(json_file['database key'], json_file['document key'])
 
     if document['return code'] == 700:
         response = {
@@ -705,7 +726,7 @@ def resurrect_document():
     elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
 
-    document = blockchain.resurrect_document(json_file['database key'], json_file['document key'])
+    document = blockchainDB.resurrect_document(json_file['database key'], json_file['document key'])
 
     if document['return code'] == 1000:
         response = {
@@ -733,7 +754,7 @@ def restore_document():
     elif json_file['version'] is None:
         return jsonify({'message': 'Please provide a version'})
 
-    document = blockchain.restore_document(json_file['database key'], json_file['document key'], json_file['version'])
+    document = blockchainDB.restore_document(json_file['database key'], json_file['document key'], json_file['version'])
 
     if document == 3000:
         response = {

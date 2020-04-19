@@ -10,13 +10,12 @@ from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA384
 
 # TODO: Test errors!
+# TODO: Test replace chain, test network updating, test that the chain updates on startup
 
 
 def test_get_chain():
     chain = app.test_client().get('/get_chain')
     assert b'{"chain":[{"database key":0,"document":{},"index":1,"previous_hash":"0","proof":1' in chain.data
-
-# TODO: Test replace chain!
 
 
 def test_create_document():
