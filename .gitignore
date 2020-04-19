@@ -1,3 +1,6 @@
 # Exclude keys #
 *.pem
 *.bin
+
+#exclude IDE prefs
+.idea
