@@ -1,4 +1,6 @@
 import base64
+import os
+
 from Crypto.PublicKey import RSA
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA384
@@ -47,8 +49,7 @@ class BlockchainDB:
         self.document = {}
         self.create_block(proof=1, previous_hash='0')
         self.nodes = set()
-        self.update_chain()
-        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
         logging.info('Starting chain...')
 
     def create_block(self, proof, previous_hash):
@@ -94,22 +95,31 @@ class BlockchainDB:
                 return False
             previous_proof = previous_block['proof']
             proof = block['proof']
-            hash_operation = hashlib.sha256(str(proof ** 2 - previous_proof ** 2).encode()).hexidigest()
-            if hash_operation[:4] == '0000':
+            hash_operation = hashlib.sha256(str(proof ** 2 - previous_proof ** 2).encode()).hexdigest()
+            if hash_operation[:4] != '0000':
                 return False
             previous_block = block
             block_index += 1
         return True
 
-    def add_node(self, address):
-        parsed_url = urlparse(address)
-        self.nodes.add(parsed_url.netloc)
-        logging.debug(f'New node added: {parsed_url.netloc}')
+    def add_node(self, address, current_node):
+        node = urlparse(address).netloc
+        if node in self.nodes or node is None:
+            return
+        self.nodes.add(node)
+        logging.debug(f'New node added: {node}')
+        self.update_chain()
+        # ensure that this node gets added to the other node
+        requests.post(f'http://{node}/connect_node', json={"nodes": [f"{current_node}"]})
 
     def replace_chain(self, chain):
+        #TODO: replace other connected nodes too
         if self.is_chain_valid(chain) and len(self.chain) < len(chain):
             self.chain = chain
             logging.info('This chain has been replaced')
+            update_thread = threading.Thread(target=blockchainDB.update_network,
+                                             args=(chain[-1]['database key'], chain[-1]['document']['document key']))
+            update_thread.start()
             return True
         else:
             # TODO: Block node trying the dodgy update? Warn someone? Log it?
@@ -121,8 +131,9 @@ class BlockchainDB:
         current_chain_length = len(self.chain)
 
         for node in network:
-            # TODO: replace this with prod node addresses
-            response = requests.get(f'http://127.0.0.1:{node}/get_chain')
+            if node is None:
+                continue
+            response = requests.get(f'http://{node}/get_chain')
             if response.status_code == 200:
                 if database_key != self.chain[-1]['database key'] and document_key != self.chain[-1]['database key']['document key']:
                     return
@@ -143,9 +154,10 @@ class BlockchainDB:
                 elif length < current_chain_length and is_chain_valid and not does_last_block_match:
                     # TODO: replace other chain, seems absurd to send the entire chain? Merkel trees to only replace
                     # the section that needs to be replaced
-                    # TODO: replace this with prod node addresses
                     logging.info(f'Updating chain at {node}')
-                    requests.post(f'http://127.0.0.1:{node}/replace_chain', json={'chain': self.chain})
+                    replace_response = requests.post(f'http://{node}/replace_chain', json={'chain': self.chain})
+                    if replace_response.status_code != 200:
+                        self.nodes.remove(node)
                 elif length == current_chain_length and is_chain_valid and not does_last_block_match:
                     logging.info(f'This chain and chain at {node}, don\'t match, next update wins')
                     continue
@@ -155,10 +167,11 @@ class BlockchainDB:
         network = self.nodes
         longest_chain = None
         longest_chain_length = len(self.chain)
-
+        if not network:
+            return
+        # todo: stop crashing if node not connected
         for node in network:
-            # TODO: replace this with prod node addresses
-            response = requests.get(f'http://127.0.0.1:{node}/get_chain')
+            response = requests.get(f'http://{node}/get_chain')
             if response.status_code == 200:
                 length = response.json()['length']
                 chain = response.json()['chain']
@@ -167,6 +180,8 @@ class BlockchainDB:
                     logging.info(f'Longer chain found at {node}')
                     longest_chain = chain
                     longest_chain_length = length
+            else:
+                self.nodes.remove(node)
 
         if longest_chain:
             self.chain = longest_chain
@@ -383,7 +398,8 @@ app = Flask(__name__)
 
 # create an address for the node on port 5000
 node_address = str(uuid.uuid4()).replace('-', '')
-
+host = '0.0.0.0'
+port = 5000
 blockchainDB = BlockchainDB()
 
 # TODO: Add logging below? See how it turns out when it gets run on a machine
@@ -427,8 +443,10 @@ def connect_node():
     if nodes is None:
         return 'No node', 400
 
+    current_node = f'http://{host}:{port}'
+
     for node in nodes:
-        blockchainDB.add_node(node)
+        blockchainDB.add_node(node, current_node)
 
     response = {'message': 'Nodes connected', 'node_list': list(blockchainDB.nodes)}
 
@@ -749,4 +767,4 @@ def restore_document():
         return jsonify(response)
 
 
-app.run(host='0.0.0.0', port=5000)
+app.run(host=host, port=port)
