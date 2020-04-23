@@ -20,7 +20,7 @@ This is repeated in the Example folder
 
 ```
 
-## Contribution
+## Contributing
 
 Raise an issue to discuss and then a PR
 
