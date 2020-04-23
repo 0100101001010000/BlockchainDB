@@ -41,7 +41,6 @@ Now that your nodes are connected feel free to play around with your new Blockch
     
 Note:
     If you want to run this in debug mode run the following command before starting up your nodes:
-    
     ```
     export `FLASK_ENV=development`
     ```
