@@ -14,7 +14,7 @@ python3 BlockchainDB_5001.py
 ```
 python3 BlockchainDB_5002.py
 ```
-Your nodes will be up and running now, but they still need to populated and connected. You can do this by running the `populate.sh` script which will populate the nodes for you and then connect them. You can also do this via the command line.
+Your nodes will be up and running now, but they still need to populated and connected. You can do this by running the `populate.sh` script which will populate the nodes for you and then connect them. You can also do this via the command line. 
 To add documents via the command line:
 ```
 curl -d '{"database key":"12345678","documents":{"1": "test document","2": "test document 2"},"signature":"Open"}' --header "Content-Type: application/json" --request POST http://0.0.0.0:5000/
