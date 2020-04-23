@@ -5,3 +5,5 @@
 #exclude IDE prefs
 .idea
 
+#exclude Example blockchain code
+Example/*.py
