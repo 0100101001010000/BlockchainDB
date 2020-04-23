@@ -113,7 +113,6 @@ class BlockchainDB:
         requests.post(f'http://{node}/connect_node', json={"nodes": [f"{current_node}"]})
 
     def replace_chain(self, chain):
-        #TODO: replace other connected nodes too
         if self.is_chain_valid(chain) and len(self.chain) < len(chain):
             self.chain = chain
             logging.info('This chain has been replaced')
@@ -122,7 +121,6 @@ class BlockchainDB:
             update_thread.start()
             return True
         else:
-            # TODO: Block node trying the dodgy update? Warn someone? Log it?
             logging.warning('There has been an attempt to update this chain with an invalid chain')
             return False
 
