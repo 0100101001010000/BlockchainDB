@@ -25,6 +25,7 @@ This is repeated in the Example folder
 Raise an issue to discuss and then a PR
 
 ## Code of conduct
+link it
 
 ## License
 MIT
