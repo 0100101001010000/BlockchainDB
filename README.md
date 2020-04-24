@@ -10,7 +10,7 @@ Fork this repository and make it you own.
 BlockchainDB uses [Pytest](https://docs.pytest.org/en/latest/), the test cases can be found in `test_BlockchainDB.py` which can be run from the command line, just type `pytest -v` and the tests should run.
 
 ## Usage
-The intention of this repository is to be forked and adapted to different projects.  
+The intention of this repository is to be forked and adapted to different projects, certain areas should be replaced and have been highlighted.
 
 ## Examples
 The Example directory has an example that allows you to start up your own chain and connect a couple of nodes together, more details can be found in the directory [README.md](https://github.com/0100101001010000/BlockchainDB/blob/master/Example/README.md)
