@@ -1,5 +1,5 @@
 # BlockchainDB
-A simple NoSQL database blockchain built using [Flask](https://flask.palletsprojects.com/en/1.1.x/).
+A simple NoSQL blockchain database built using [Flask](https://flask.palletsprojects.com/en/1.1.x/).
 
 BlockchainDB uses the blockchain techonology to provide a safe and decentralised database, meaning that your data is safer as it is copied a.cross multiple nodes limiting the ability of someone to corrupt your data. This also means that each node is a failover for the other, if one fails the others will have the same data so will still be able to run your query. BlockchainDB also allows you to upload encrypted data so that only people with the keys can decrypt it.
 
