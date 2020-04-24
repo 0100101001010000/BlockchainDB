@@ -7,7 +7,7 @@ BlockchainDB uses the blockchain techonology to provide a safe and decentralised
 Fork this repository and make it you own.
 
 ## Testing
-BlockchainDB uses [Pytest](https://docs.pytest.org/en/latest/), the test cases can be found in `test_BlockchainDB.py` which can run from the command line, just type `pytest -v` and the tests should run.
+BlockchainDB uses [Pytest](https://docs.pytest.org/en/latest/), the test cases can be found in `test_BlockchainDB.py` which can be run from the command line, just type `pytest -v` and the tests should run.
 
 ## Usage
 The intention of this repository is to be forked and adapted to different projects.  
