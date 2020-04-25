@@ -189,7 +189,7 @@ class BlockchainDB:
     def get_all_documents(self, database_key):
         return self.get_document(database_key, 0, 'all latest')
 
-    def ytcreate_document(self, database_key, document, signature):
+    def create_document(self, database_key, document, signature):
         document_key = str(uuid.uuid4())
         self.database_key = database_key
         self.document = {
