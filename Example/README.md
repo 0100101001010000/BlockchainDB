@@ -1,4 +1,4 @@
-# Setting up your own network in UNIX
+# Setting up your own BlockchainDB in UNIX
 
 This area will help you setup and run your own blockchain and connect 4 nodes up together.
 
