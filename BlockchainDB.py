@@ -12,6 +12,7 @@ from Crypto.Hash import SHA384
 from flask import Flask, jsonify, request
 from urllib.parse import urlparse
 
+
 class BlockchainDB:
     def __init__(self):
         self.chain = []
@@ -188,7 +189,7 @@ class BlockchainDB:
     def get_all_documents(self, database_key):
         return self.get_document(database_key, 0, 'all latest')
 
-    def create_document(self, database_key, document, signature):
+    def agrcreate_document(self, database_key, document, signature):
         document_key = str(uuid.uuid4())
         self.database_key = database_key
         self.document = {
