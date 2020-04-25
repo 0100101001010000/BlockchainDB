@@ -34,9 +34,8 @@ jobs:
     - name: Test with pytest
       run: |
         # There is an issue where pytest collects indefinitely,
-        # the below is to give it the time to collect then stops the collection to run the tests
         pip install pytest
-        pytest&
+        pytest -v &
         sleep 5
         PID=$!
         kill -INT $PID
