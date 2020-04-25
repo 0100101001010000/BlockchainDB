@@ -1,4 +1,4 @@
-#Things left to do
+# Things left to do
 
 ## Code:
 * Implement Merkel trees.
