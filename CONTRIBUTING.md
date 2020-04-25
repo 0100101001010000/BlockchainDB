@@ -1,6 +1,6 @@
 Thank you for thinking about contributing to BlockchainDB, every little PR helps.
 
-Don't know where to start, check out the (TODO list)[https://github.com/0100101001010000/BlockchainDB/blob/master/TODO.md]
+Don't know where to start, check out the [TODO list](https://github.com/0100101001010000/BlockchainDB/blob/master/TODO.md)
 
 Here are a few guidelines to follow to keep everyone happy.
 
