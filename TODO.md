@@ -2,6 +2,7 @@
 
 ## Code:
 * Add failures to calls that don't have any (see wiki)
+* Add deletion, restoration, ressurection protection using signature
 * Implement Merkel trees.
     * Once done, change the code to stop using and comparing the entire chain for validity and updates.
 * Replace hashlib with pycryptodome once there is an explanation for the increased time.
