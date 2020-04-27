@@ -257,7 +257,7 @@ class BlockchainDB:
             return {'return code': 101, 'return message': 'Document successfully updated'}
         return {'return code': 200, 'return message': 'Issue updating the document'}
 
-    def delete_document(self, database_key, document_key):
+    def delete_document(self, database_key, document_key, public_key=b''):
         previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document['return code'] != 300:
             return previous_document
@@ -265,23 +265,50 @@ class BlockchainDB:
         if not previous_document['return info']['is alive']:
             return {'return code': 203, 'return message': 'Document is already dead'}
 
+        if previous_document['return info']['signature'] != 'Open':
+            if public_key == '':
+                return {{'return code': 201, 'return message': 'Public key cannot be empty'}}
+            retrieved_signature = base64.b64decode(previous_document['return info']['signature'])
+            verification_key = RSA.import_key(public_key)
+            verifier = pkcs1_15.new(verification_key)
+            hash_verify = SHA384.new()
+            hash_verify.update(previous_document['return info']['document'].encode('utf-8'))
+            try:
+                verifier.verify(hash_verify, retrieved_signature)
+            except ValueError:
+                return {'return code': 202, 'return message': 'Cannot verify document'}
+
         self.database_key = database_key
         self.document = {
                 'document key': document_key,
                 'version': previous_document['return info']['version'] + 1,
                 'is alive': False,
-                'document': previous_document['return info']['document']
+                'document': previous_document['return info']['document'],
+                'signature': previous_document['return info']['signature']
             }
         self.mine_block()
         return {'return code': 102, 'return message': 'Document successfully deleted'}
 
-    def resurrect_document(self, database_key, document_key):
+    def resurrect_document(self, database_key, document_key, public_key=b''):
         previous_document = self.get_document(database_key, document_key, 'latest')
         if previous_document['return code'] != 300:
             return previous_document
 
         if previous_document['return info']['is alive']:
             return {'return code': 204, 'return message': 'Document is alive'}
+
+        if previous_document['return info']['signature'] != 'Open':
+            if public_key == '':
+                return {{'return code': 201, 'return message': 'Public key cannot be empty'}}
+            retrieved_signature = base64.b64decode(previous_document['return info']['signature'])
+            verification_key = RSA.import_key(public_key)
+            verifier = pkcs1_15.new(verification_key)
+            hash_verify = SHA384.new()
+            hash_verify.update(previous_document['return info']['document'].encode('utf-8'))
+            try:
+                verifier.verify(hash_verify, retrieved_signature)
+            except ValueError:
+                return {'return code': 202, 'return message': 'Cannot verify document'}
 
         self.database_key = database_key
         self.document = {
@@ -294,11 +321,15 @@ class BlockchainDB:
         logging.debug('Document resurrected')
         return {'return code': 103, 'return message': 'Document successfully resurrected'}
 
-    def restore_document(self, database_key, document_key, version):
+    def restore_document(self, database_key, document_key, version, public_key=b''):
         old_document = self.get_specific_document_version(database_key, document_key, version)
         if old_document['return code'] != 301:
             return {'return code': 205, 'return message': old_document['return info']}
-        return_code = self.update_document(database_key, document_key, old_document['return info']['document'], False)
+
+        if public_key == '':
+            return_code = self.update_document(database_key, document_key, old_document['return info']['document'], old_document['return info']['signature'])
+        else:
+            return_code = self.update_document(database_key, document_key, old_document['return info']['document'], old_document['return info']['signature'], public_key)
 
         if return_code['return code'] != 101:
             return {'return code': 206, 'return info': f'Issues restoring the document: {return_code}'}
@@ -462,7 +493,7 @@ def get_all_versions():
 
     if document['return code'] == 301:
         response = {
-            'message': f'All document versions successfully retrieved',
+            'message': 'All document versions successfully retrieved',
             'document': document['return info']
         }
         return jsonify(response)
@@ -486,12 +517,12 @@ def get_all_db_documents():
 
     if document['return code'] == 302:
         response = {
-            'message': f'All documents successfully retrieved',
+            'message': 'All documents successfully retrieved',
             'document': document['return info']
         }
         return jsonify(response)
     else:
-        response = {'message': f'Issue retrieving the document {document}'}
+        response = {'message': f'Issue retrieving documents {document}'}
         return jsonify(response)
 
 
@@ -525,9 +556,7 @@ def create_document():
 
         return jsonify(response)
     else:
-        response = {
-            'message': f'{document_key["return code"]}, issue creating document: {document_key["return info"]}'
-        }
+        response = {'message': f'Issue creating document: {document_key["return info"]}'}
         return jsonify(response)
 
 
@@ -574,7 +603,7 @@ def update_document():
         return jsonify({'message': 'Please provide a document key'})
     elif json_file['document'] is None:
         return jsonify({'message': 'Please provide a document'})
-    if json_file['signature'] == '':
+    elif json_file['signature'] == '':
         return jsonify({'message': 'Please provide a signature'})
 
     if 'public key' not in json_file:
@@ -590,9 +619,7 @@ def update_document():
                                                 json_file['public key'])
 
     if document == 101:
-        response = {
-            'message': f'Document successfully updated'
-        }
+        response = {'message': 'Document successfully updated'}
 
         update_thread = threading.Thread(target=blockchainDB.update_network,
                                          args=(json_file['database key'], json_file['document key']))
@@ -600,7 +627,7 @@ def update_document():
 
         return jsonify(response)
     else:
-        response = {'message': f'Issue retrieving the document: {document}'}
+        response = {'message': f'Issue updating the document: {document}'}
         return jsonify(response)
 
 
@@ -617,12 +644,15 @@ def delete_document():
     elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
 
-    document = blockchainDB.delete_document(json_file['database key'], json_file['document key'])
+    if 'public key' not in json_file:
+        document = blockchainDB.delete_document(json_file['database key'], json_file['document key'])
+    else:
+        document = blockchainDB.delete_document(json_file['database key'],
+                                                json_file['document key'],
+                                                json_file['public key'])
 
     if document['return code'] == 102:
-        response = {
-            'message': f'Document successfully deleted'
-        }
+        response = {'message': 'Document successfully deleted'}
         update_thread = threading.Thread(target=blockchainDB.update_network,
                                          args=(json_file['database key'], json_file['document key']))
         update_thread.start()
@@ -646,12 +676,15 @@ def resurrect_document():
     elif json_file['document key'] == '':
         return jsonify({'message': 'Please provide a document key'})
 
-    document = blockchainDB.resurrect_document(json_file['database key'], json_file['document key'])
+    if 'public key' not in json_file:
+        document = blockchainDB.resurrect_document(json_file['database key'], json_file['document key'])
+    else:
+        document = blockchainDB.resurrect_document(json_file['database key'],
+                                                   json_file['document key'],
+                                                   json_file['public key'])
 
     if document['return code'] == 103:
-        response = {
-            'message': f'Document successfully resurrected'
-        }
+        response = {'message': 'Document successfully resurrected'}
         update_thread = threading.Thread(target=blockchainDB.update_network,
                                          args=(json_file['database key'], json_file['document key']))
         update_thread.start()
@@ -676,14 +709,18 @@ def restore_document():
     elif json_file['version'] is None:
         return jsonify({'message': 'Please provide a version'})
 
-    document = blockchainDB.restore_document(json_file['database key'],
+    if 'public key' not in json_file:
+        document = blockchainDB.restore_document(json_file['database key'],
                                              json_file['document key'],
                                              json_file['version'])
+    else:
+        document = blockchainDB.restore_document(json_file['database key'],
+                                                 json_file['document key'],
+                                                 json_file['version'],
+                                                 json_file['public key'])
 
     if document == 104:
-        response = {
-            'message': f'Document successfully restored'
-        }
+        response = {'message': 'Document successfully restored'}
         update_thread = threading.Thread(target=blockchainDB.update_network,
                                          args=(json_file['database key'], json_file['document key']))
         update_thread.start()

@@ -221,8 +221,7 @@ class TestQuerying:
 
         chain = client.post('/delete_document', json={
             'database key': database_key,
-            'document key': doc_key,
-            'signature': 'Open'
+            'document key': doc_key
         })
 
         assert b'Document successfully deleted' in chain.data
@@ -250,8 +249,7 @@ class TestQuerying:
 
         chain = client.post('/resurrect_document', json={
             'database key': database_key,
-            'document key': doc_key,
-            'signature': 'Open'
+            'document key': doc_key
         })
 
         assert b'Document successfully resurrected' in chain.data
