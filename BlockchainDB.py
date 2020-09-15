@@ -65,6 +65,7 @@ class BlockchainDB:
         return hashlib.sha256(encoded_block).hexdigest()
 
     def is_chain_valid(self, chain):
+        # TODO: Needs to be looped...
         previous_block = chain[0]
         block_index = 1
         if block_index < len(chain):
